@@ -1,0 +1,6 @@
+{
+  "name": "Hausmeister Pro – Facility & Einsatzmanagement",
+  "description": "Enterprise-PWA für Hausmeisterdienste, Objektbetreuung, Mülltonnen-Logistik, Einsatzplanung und ArbZG-konforme Arbeitszeiterfassung.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
