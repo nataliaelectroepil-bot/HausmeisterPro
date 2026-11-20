@@ -48,6 +48,31 @@ export const pocketbaseConfig = {
   },
 };
 
+let inMemoryAuthToken: string | null = null;
+let inMemoryAuthModel: User | null = null;
+
+export const pb = {
+  authStore: {
+    get token(): string {
+      return inMemoryAuthToken ?? '';
+    },
+    get model(): User | null {
+      return inMemoryAuthModel;
+    },
+    get isValid(): boolean {
+      return Boolean(inMemoryAuthToken && inMemoryAuthModel);
+    },
+    save(token: string, model: User | null): void {
+      inMemoryAuthToken = token || null;
+      inMemoryAuthModel = model;
+    },
+    clear(): void {
+      inMemoryAuthToken = null;
+      inMemoryAuthModel = null;
+    },
+  },
+};
+
 /**
  * Optional PocketBase REST helper.
  * Automatically active when VITE_POCKETBASE_URL is configured; otherwise falls back to local persistence.
@@ -58,6 +83,7 @@ async function pbRequest<T>(path: string, init?: RequestInit): Promise<T | null>
     const res = await fetch(`${pocketbaseConfig.baseUrl.replace(/\/$/, '')}${path}`, {
       headers: {
         'Content-Type': 'application/json',
+        ...(pb.authStore.token ? { Authorization: `Bearer ${pb.authStore.token}` } : {}),
         ...(init?.headers || {}),
       },
       ...init,
@@ -95,8 +121,8 @@ function buildSeedData() {
     {
       id: 'u1',
       employee_id: 'HM-101',
-      name: 'Thomas Berger',
-      email: 't.berger@hausmeister-pro.de',
+      name: 'Administrator',
+      email: 'sandokanmcroar@gmail.com',
       role: 'admin',
       phone: '+49 171 4829103',
       region: 'München Gesamt (Einsatzleitung)',
@@ -299,6 +325,7 @@ function buildSeedData() {
       ],
       notes: 'Schlüssel Nr. 14b für Wasseranschluss im Technikraum.',
       photos: [],
+      bin_types: ['Restmüll', 'Papier'],
     },
     {
       id: 't6',
@@ -863,6 +890,174 @@ function writeStorage<T>(key: string, value: T): void {
 }
 
 export const pocketbaseService = {
+  isPocketBaseEnabled(): boolean {
+    return Boolean(pocketbaseConfig.baseUrl.trim());
+  },
+
+  getAuthToken(): string | null {
+    return pb.authStore.token || null;
+  },
+
+  clearAuth(): void {
+    pb.authStore.clear();
+    this.setCurrentUserId(null);
+  },
+
+  async getAuthStatus(): Promise<{
+    adminEmail: string;
+    adminConfigured: boolean;
+    usesEnvPasscode: boolean;
+  }> {
+    if (this.isPocketBaseEnabled()) {
+      return {
+        adminEmail: 'sandokanmcroar@gmail.com',
+        adminConfigured: true,
+        usesEnvPasscode: false,
+      };
+    }
+    try {
+      const res = await fetch('/api/auth/status');
+      if (res.ok) {
+        return (await res.json()) as {
+          adminEmail: string;
+          adminConfigured: boolean;
+          usesEnvPasscode: boolean;
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return {
+      adminEmail: 'sandokanmcroar@gmail.com',
+      adminConfigured: false,
+      usesEnvPasscode: false,
+    };
+  },
+
+  async setupAdminAccount(
+    email: string,
+    password: string
+  ): Promise<{ ok: true; userId: string } | { ok: false; error: string }> {
+    try {
+      const res = await fetch('/api/auth/setup-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = (await res.json()) as { token?: string; user?: { id: string; email: string; role: User['role'] }; error?: string };
+      if (!res.ok || !data.token || !data.user) {
+        return { ok: false, error: data.error || 'SETUP_FAILED' };
+      }
+      const usersList = await this.getUsers();
+      const matched =
+        usersList.find((u) => u.id === data.user?.id || u.email.toLowerCase() === data.user?.email.toLowerCase()) ?? {
+          id: data.user.id,
+          employee_id: 'HM-101',
+          name: 'Administrator',
+          email: data.user.email,
+          role: data.user.role,
+          phone: '',
+          region: 'Einsatzleitung',
+          language: 'DE' as LanguageCode,
+        };
+      pb.authStore.save(data.token, matched);
+      return { ok: true, userId: data.user.id };
+    } catch {
+      return { ok: false, error: 'NETWORK_ERROR' };
+    }
+  },
+
+  async loginWithCredentials(
+    email: string,
+    password: string
+  ): Promise<{ ok: true; user: User } | { ok: false; error: string }> {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (this.isPocketBaseEnabled()) {
+      try {
+        const res = await fetch(
+          `${pocketbaseConfig.baseUrl.replace(/\/$/, '')}/api/collections/${pocketbaseConfig.collections.users}/auth-with-password`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identity: normalizedEmail, password }),
+          }
+        );
+        const data = (await res.json()) as { token?: string; record?: User };
+        if (!res.ok || !data.token || !data.record) {
+          return { ok: false, error: 'INVALID_CREDENTIALS' };
+        }
+        pb.authStore.save(data.token, data.record);
+        return { ok: true, user: data.record };
+      } catch {
+        return { ok: false, error: 'NETWORK_ERROR' };
+      }
+    }
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail, password }),
+      });
+      const data = (await res.json()) as {
+        token?: string;
+        user?: { id: string; email: string; role: User['role'] };
+        error?: string;
+      };
+      if (!res.ok || !data.token || !data.user) {
+        return { ok: false, error: data.error || 'INVALID_CREDENTIALS' };
+      }
+      const usersList = await this.getUsers();
+      const matched =
+        usersList.find(
+          (u) => u.id === data.user?.id || u.email.toLowerCase() === normalizedEmail
+        ) ?? {
+          id: data.user.id,
+          employee_id: 'HM-101',
+          name: 'Administrator',
+          email: data.user.email,
+          role: data.user.role,
+          phone: '',
+          region: 'Einsatzleitung',
+          language: 'DE' as LanguageCode,
+        };
+      pb.authStore.save(data.token, matched);
+      return { ok: true, user: matched };
+    } catch {
+      return { ok: false, error: 'NETWORK_ERROR' };
+    }
+  },
+
+  async loginDemoNonAdmin(
+    userId: string
+  ): Promise<{ ok: true; user: User } | { ok: false; error: string }> {
+    try {
+      const res = await fetch('/api/auth/demo-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      const data = (await res.json()) as {
+        token?: string;
+        user?: { id: string };
+        error?: string;
+      };
+      if (!res.ok || !data.token || !data.user) {
+        return { ok: false, error: data.error || 'DEMO_LOGIN_NOT_ALLOWED' };
+      }
+      const usersList = await this.getUsers();
+      const matched = usersList.find((u) => u.id === data.user?.id);
+      if (!matched || matched.role === 'admin') {
+        pb.authStore.clear();
+        return { ok: false, error: 'DEMO_LOGIN_NOT_ALLOWED' };
+      }
+      pb.authStore.save(data.token, matched);
+      return { ok: true, user: matched };
+    } catch {
+      return { ok: false, error: 'NETWORK_ERROR' };
+    }
+  },
+
   // Users & Session
   async getUsers(): Promise<User[]> {
     const remote = await pbRequest<{ items: User[] }>(
@@ -870,25 +1065,33 @@ export const pocketbaseService = {
     );
     if (remote?.items) return remote.items;
     const seed = buildSeedData();
-    return readStorage<User[]>(STORAGE_KEYS.users, seed.users);
+    const stored = readStorage<User[]>(STORAGE_KEYS.users, seed.users);
+    const needsAdminEmailSync = stored.some(
+      (u) => u.id === 'u1' && u.email === 't.berger@hausmeister-pro.de'
+    );
+    if (needsAdminEmailSync) {
+      const synced = stored.map((u) =>
+        u.id === 'u1'
+          ? { ...u, name: 'Administrator', email: 'sandokanmcroar@gmail.com' }
+          : u
+      );
+      writeStorage(STORAGE_KEYS.users, synced);
+      return synced;
+    }
+    return stored;
   },
 
   getCurrentUserId(): string | null {
-    try {
-      const val = localStorage.getItem(STORAGE_KEYS.currentUserId);
-      if (val === null) {
-        localStorage.setItem(STORAGE_KEYS.currentUserId, 'u1');
-        return 'u1';
-      }
-      return val === '' ? null : val;
-    } catch {
-      return 'u1';
-    }
+    return null;
   },
 
   setCurrentUserId(userId: string | null): void {
     try {
-      localStorage.setItem(STORAGE_KEYS.currentUserId, userId ?? '');
+      if (!userId) {
+        localStorage.removeItem(STORAGE_KEYS.currentUserId);
+      } else {
+        localStorage.setItem(STORAGE_KEYS.currentUserId, userId);
+      }
     } catch {
       // ignore
     }
@@ -982,6 +1185,21 @@ export const pocketbaseService = {
   },
 
   async createTask(input: Omit<FacilityTask, 'id' | 'created_at'>): Promise<FacilityTask> {
+    if (this.isPocketBaseEnabled() && pb.authStore.token) {
+      const remoteCreated = await pbRequest<FacilityTask>(
+        `/api/collections/${pocketbaseConfig.collections.tasks}/records`,
+        {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }
+      );
+      if (remoteCreated) {
+        const list = await this.getTasks();
+        writeStorage(STORAGE_KEYS.tasks, list);
+        return remoteCreated;
+      }
+    }
+
     const created: FacilityTask = {
       ...input,
       id: `task_${Date.now()}`,
@@ -1052,8 +1270,13 @@ export const pocketbaseService = {
 
   // Time Entries
   async getTimeEntries(): Promise<TimeEntry[]> {
+    const activeUser = pb.authStore.model;
+    const filterParam =
+      activeUser && activeUser.role !== 'admin'
+        ? `&filter=${encodeURIComponent(`user_id="${activeUser.id}"`)}`
+        : '';
     const remote = await pbRequest<{ items: TimeEntry[] }>(
-      `/api/collections/${pocketbaseConfig.collections.time_entries}/records`
+      `/api/collections/${pocketbaseConfig.collections.time_entries}/records?perPage=200&sort=-date${filterParam}`
     );
     if (remote?.items) return remote.items;
     const seed = buildSeedData();
@@ -1061,9 +1284,42 @@ export const pocketbaseService = {
   },
 
   async upsertTimeEntry(entry: TimeEntry): Promise<TimeEntry[]> {
+    const activeUserId = pb.authStore.model?.id || entry.user_id;
+    const boundEntry: TimeEntry = { ...entry, user_id: activeUserId };
+
+    if (this.isPocketBaseEnabled() && pb.authStore.token) {
+      const isLocalTempId = boundEntry.id.startsWith('te_');
+      if (!isLocalTempId) {
+        const patched = await pbRequest<TimeEntry>(
+          `/api/collections/${pocketbaseConfig.collections.time_entries}/records/${boundEntry.id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify(boundEntry),
+          }
+        );
+        if (patched) {
+          return this.getTimeEntries();
+        }
+      }
+
+      const { id: _ignoredLocalId, ...createPayload } = boundEntry;
+      const created = await pbRequest<TimeEntry>(
+        `/api/collections/${pocketbaseConfig.collections.time_entries}/records`,
+        {
+          method: 'POST',
+          body: JSON.stringify(createPayload),
+        }
+      );
+      if (created) {
+        return this.getTimeEntries();
+      }
+    }
+
     const list = await this.getTimeEntries();
-    const exists = list.some((e) => e.id === entry.id);
-    const updated = exists ? list.map((e) => (e.id === entry.id ? entry : e)) : [entry, ...list];
+    const exists = list.some((e) => e.id === boundEntry.id);
+    const updated = exists
+      ? list.map((e) => (e.id === boundEntry.id ? boundEntry : e))
+      : [boundEntry, ...list];
     writeStorage(STORAGE_KEYS.timeEntries, updated);
     return updated;
   },

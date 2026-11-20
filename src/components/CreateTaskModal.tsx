@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
 import {
+  AlertCircle,
   Camera,
+  Check,
   CheckCircle2,
   Loader2,
   MapPin,
   Plus,
   Search,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 import {
+  BinType,
   ChecklistItem,
   FacilityTask,
   PropertyObject,
@@ -18,6 +22,7 @@ import {
   TaskPriority,
   User,
 } from '../types/facility';
+import { BIN_TYPE_ORDER, BIN_VISUAL_META } from '../utils/binMeta';
 import { getTodayISODate } from '../utils/dateUtils';
 import { searchAddressCoordinates } from '../utils/geocoding';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
@@ -78,6 +83,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const workers = users.filter((u) => u.role === 'worker' || u.role === 'admin');
 
   const [category, setCategory] = useState<TaskCategory>('Reinigung');
+  const [selectedBinTypes, setSelectedBinTypes] = useState<BinType[]>([]);
+  const [binValidationError, setBinValidationError] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [objectId, setObjectId] = useState<string>(objects[0]?.id ?? '');
@@ -162,9 +169,33 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     e.target.value = '';
   };
 
+  const toggleBinType = (bin: BinType) => {
+    setBinValidationError(false);
+    setSelectedBinTypes((prev) =>
+      prev.includes(bin) ? prev.filter((item) => item !== bin) : [...prev, bin]
+    );
+  };
+
+  const getBinOptionLabel = (bin: BinType): string => {
+    switch (bin) {
+      case 'Restmüll':
+        return t('createTask.binRestmuell');
+      case 'Bio':
+        return t('createTask.binBio');
+      case 'Papier':
+        return t('createTask.binPapier');
+      case 'Gelbe Tonne':
+        return t('createTask.binGelb');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !objectId) return;
+    if (category === 'Mülltonnendienst' && selectedBinTypes.length === 0) {
+      setBinValidationError(true);
+      return;
+    }
     setSubmitting(true);
     try {
       const checklist: ChecklistItem[] = DEFAULT_CHECKLISTS[category].map((label, idx) => ({
@@ -184,6 +215,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         checklist_json: checklist,
         notes: '',
         photos,
+        bin_types: category === 'Mülltonnendienst' ? selectedBinTypes : undefined,
       });
       onClose();
     } finally {
@@ -219,7 +251,10 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 <button
                   key={cat}
                   type="button"
-                  onClick={() => setCategory(cat)}
+                  onClick={() => {
+                    setCategory(cat);
+                    setBinValidationError(false);
+                  }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                     category === cat
                       ? 'bg-orange-500 text-white'
@@ -231,6 +266,59 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               ))}
             </div>
           </div>
+
+          {/* Pflichtauswahl Tonnenart / Farbe bei Mülltonnendienst */}
+          {category === 'Mülltonnendienst' && (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-3.5 space-y-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
+                    <Trash2 className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                    <span>{t('createTask.binTypesLabel')}</span>
+                  </label>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    {t('createTask.binTypesHint')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {BIN_TYPE_ORDER.map((bin) => {
+                  const selected = selectedBinTypes.includes(bin);
+                  const meta = BIN_VISUAL_META[bin];
+                  return (
+                    <button
+                      key={bin}
+                      type="button"
+                      onClick={() => toggleBinType(bin)}
+                      className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-xs font-semibold transition-all cursor-pointer min-h-[42px] ${
+                        selected
+                          ? meta.activeCardClass
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-600'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`h-3.5 w-3.5 rounded-full shrink-0 ${meta.dotClass} ${
+                            selected ? 'ring-2 ring-white/80' : ''
+                          }`}
+                        />
+                        <span className="truncate">{getBinOptionLabel(bin)}</span>
+                      </span>
+                      {selected && <Check className="w-4 h-4 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {binValidationError && selectedBinTypes.length === 0 && (
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-red-600 dark:text-red-400">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{t('createTask.binTypesRequired')}</span>
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Aufgabentitel */}
           <div>
@@ -513,7 +601,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={submitting || !title.trim()}
+              disabled={
+                submitting ||
+                !title.trim() ||
+                (category === 'Mülltonnendienst' && selectedBinTypes.length === 0)
+              }
               className="rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-5 py-2.5 text-sm font-semibold text-white transition-colors cursor-pointer"
             >
               {submitting ? t('common.saving') : t('createTask.submit')}

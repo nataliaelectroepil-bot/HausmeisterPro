@@ -18,6 +18,7 @@ import {
 } from '../types/facility';
 import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
+import { BIN_VISUAL_META } from '../utils/binMeta';
 
 interface TasksTabProps {
   tasks: FacilityTask[];
@@ -46,7 +47,7 @@ export const TasksTab: React.FC<TasksTabProps> = ({
   onOpenTaskDetail,
   onQuickCompleteWithPhoto,
 }) => {
-  const { t, tCategory, tStatus, tPriority } = useTranslation();
+  const { t, tCategory, tStatus, tPriority, tBin } = useTranslation();
   const [selectedCategory, setSelectedCategory] = useState<'Alle' | TaskCategory>('Alle');
   const [selectedStatus, setSelectedStatus] = useState<TaskStatus>('offen');
   const [searchQuery, setSearchQuery] = useState('');
@@ -290,6 +291,23 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                       · {obj?.address ?? '—'}
                     </span>
                   </p>
+
+                  {task.bin_types && task.bin_types.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {task.bin_types.map((bin) => {
+                        const meta = BIN_VISUAL_META[bin];
+                        return (
+                          <span
+                            key={bin}
+                            className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold ${meta.badgeClass}`}
+                          >
+                            <span className={`h-2 w-2 rounded-full ${meta.dotClass} ring-1 ring-white/50`} />
+                            <span>{tBin(bin)}</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Footer Row */}

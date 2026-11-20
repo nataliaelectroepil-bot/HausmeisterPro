@@ -17,6 +17,7 @@ import {
   getTodayISODate,
   getWeekStartEnd,
 } from '../utils/dateUtils';
+import { BIN_VISUAL_META } from '../utils/binMeta';
 
 interface CalendarTabProps {
   tasks: FacilityTask[];
@@ -248,6 +249,16 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                         }`}
                       />
                     ))}
+                    {dayTasks
+                      .flatMap((t) => t.bin_types ?? [])
+                      .slice(0, 4)
+                      .map((bin, idx) => (
+                        <span
+                          key={`${dateStr}_tbin_${idx}`}
+                          title={tBin(bin)}
+                          className={`h-2 w-2 rounded-full ${BIN_DOT_COLOR[bin]}`}
+                        />
+                      ))}
                   </div>
                 </button>
               );
@@ -325,6 +336,22 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                     <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">
                       {obj?.name ?? t('common.object')}
                     </p>
+                    {task.bin_types && task.bin_types.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {task.bin_types.map((bin) => {
+                          const meta = BIN_VISUAL_META[bin];
+                          return (
+                            <span
+                              key={bin}
+                              className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${meta.badgeClass}`}
+                            >
+                              <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass} ring-1 ring-white/50`} />
+                              <span>{tBin(bin)}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </button>
                 );
               })}

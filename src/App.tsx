@@ -210,16 +210,42 @@ export default function App() {
 
   const handleLogin = (user: User) => {
     pocketbaseService.setCurrentUserId(user.id);
+    setUsers((prev) => (prev.some((u) => u.id === user.id) ? prev : [...prev, user]));
     setCurrentUserId(user.id);
     if (user.language) {
       setUiLanguage(user.language);
       pocketbaseService.setSavedUiLanguage(user.language);
     }
+    if (pocketbaseService.isPocketBaseEnabled()) {
+      void Promise.all([
+        pocketbaseService.getUsers(),
+        pocketbaseService.getObjects(),
+        pocketbaseService.getTasks(),
+        pocketbaseService.getBinSchedules(),
+        pocketbaseService.getTimeEntries(),
+        pocketbaseService.getWinterLogs(),
+        pocketbaseService.getMeterReadings(),
+        pocketbaseService.getHandoverProtocols(),
+        pocketbaseService.getCleaningLogs(),
+        pocketbaseService.getGardenLogs(),
+      ]).then(([u, o, t, b, te, wl, mr, hp, cl, gl]) => {
+        setUsers(u.some((usr) => usr.id === user.id) ? u : [...u, user]);
+        setObjects(o);
+        setTasks(t);
+        setBinSchedules(b);
+        setTimeEntries(te);
+        setWinterLogs(wl);
+        setMeterReadings(mr);
+        setHandoverProtocols(hp);
+        setCleaningLogs(cl);
+        setGardenLogs(gl);
+      });
+    }
     setActiveTab('karte');
   };
 
   const handleLogout = () => {
-    pocketbaseService.setCurrentUserId(null);
+    pocketbaseService.clearAuth();
     setCurrentUserId(null);
   };
 

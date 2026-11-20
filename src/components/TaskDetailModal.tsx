@@ -22,6 +22,7 @@ import {
 } from '../types/facility';
 import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
+import { BIN_VISUAL_META } from '../utils/binMeta';
 
 interface TaskDetailModalProps {
   task: FacilityTask;
@@ -38,7 +39,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onClose,
   onUpdateTask,
 }) => {
-  const { t, tCategory, tStatus } = useTranslation();
+  const { t, tCategory, tStatus, tBin } = useTranslation();
   const [notes, setNotes] = useState(task.notes);
   const [newCheckItem, setNewCheckItem] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
@@ -217,6 +218,22 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             <h2 className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white leading-snug">
               {task.title}
             </h2>
+            {task.bin_types && task.bin_types.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {task.bin_types.map((bin) => {
+                  const meta = BIN_VISUAL_META[bin];
+                  return (
+                    <span
+                      key={bin}
+                      className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold ${meta.badgeClass}`}
+                    >
+                      <span className={`h-2 w-2 rounded-full ${meta.dotClass} ring-1 ring-white/50`} />
+                      <span>{tBin(bin)}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <button

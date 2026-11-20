@@ -64,6 +64,7 @@ export interface FacilityTask {
   checklist_json: ChecklistItem[];
   notes: string;
   photos: TaskPhoto[];
+  bin_types?: BinType[];
   signature?: string; // base64 PNG dataUrl
   completed_at?: string;
 }

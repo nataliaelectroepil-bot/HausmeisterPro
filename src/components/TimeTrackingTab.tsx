@@ -8,6 +8,7 @@ import {
   Pause,
   Play,
   Square,
+  User as UserIcon,
 } from 'lucide-react';
 import { TimeEntry, User } from '../types/facility';
 import {
@@ -20,6 +21,7 @@ import {
 import { exportMonthlyTimesheetPDF } from '../utils/pdfExport';
 import { useTranslation } from '../i18n/LanguageContext';
 import { PDF_LABELS } from '../i18n/translations';
+import { pb } from '../services/pocketbaseService';
 
 interface TimeTrackingTabProps {
   currentUser: User;
@@ -38,11 +40,18 @@ export const TimeTrackingTab: React.FC<TimeTrackingTabProps> = ({
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [expandedDayId, setExpandedDayId] = useState<string | null>(null);
 
+  const sessionModel = pb.authStore.model ?? currentUser;
+  const activeWorkerId = sessionModel.id;
+  const activeWorkerName =
+    (typeof sessionModel.name === 'string' && sessionModel.name.trim()) ||
+    sessionModel.email;
+  const activeEmployeeId = sessionModel.employee_id;
+
   const userEntries = useMemo(() => {
     return timeEntries
-      .filter((e) => e.user_id === currentUser.id)
+      .filter((e) => e.user_id === activeWorkerId)
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [timeEntries, currentUser.id]);
+  }, [timeEntries, activeWorkerId]);
 
   const todayEntry = userEntries.find((e) => e.date === todayStr);
 
@@ -124,8 +133,8 @@ export const TimeTrackingTab: React.FC<TimeTrackingTabProps> = ({
     const nowIso = new Date().toISOString();
     if (!todayEntry) {
       await onUpsertTimeEntry({
-        id: `te_${currentUser.id}_${todayStr}`,
-        user_id: currentUser.id,
+        id: `te_${activeWorkerId}_${todayStr}`,
+        user_id: activeWorkerId,
         date: todayStr,
         start_time: nowIso,
         total_pause_minutes: 0,
@@ -222,7 +231,7 @@ export const TimeTrackingTab: React.FC<TimeTrackingTabProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Page Title & PDF Export */}
+      {/* Page Title, Active Worker Badge & PDF Export */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
@@ -231,13 +240,27 @@ export const TimeTrackingTab: React.FC<TimeTrackingTabProps> = ({
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
             {t('time.subtitle')}
           </p>
+          <div className="mt-2 inline-flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs sm:text-sm shadow-xs">
+            <UserIcon className="w-4 h-4 text-orange-500 shrink-0" />
+            <span className="font-semibold text-slate-500 dark:text-slate-400">
+              {t('time.workerLabel')}:
+            </span>
+            <span className="font-bold text-slate-900 dark:text-white">
+              {activeWorkerName}
+            </span>
+            {activeEmployeeId && (
+              <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-slate-700 pl-2 tabular-nums">
+                {activeEmployeeId}
+              </span>
+            )}
+          </div>
         </div>
 
         <button
           type="button"
           onClick={() =>
             exportMonthlyTimesheetPDF({
-              user: currentUser,
+              user: { ...sessionModel, id: activeWorkerId, name: activeWorkerName },
               monthLabel: pdfMonthLabel,
               entries: monthEntries,
               docLang: docLanguage,
