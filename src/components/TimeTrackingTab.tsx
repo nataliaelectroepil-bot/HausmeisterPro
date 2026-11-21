@@ -34,7 +34,7 @@ export const TimeTrackingTab: React.FC<TimeTrackingTabProps> = ({
   timeEntries,
   onUpsertTimeEntry,
 }) => {
-  const { t, locale, docLanguage } = useTranslation();
+  const { t, locale, docLanguage, months } = useTranslation();
   const oclockSuffix = t('common.oclock') ? ` ${t('common.oclock')}` : '';
   const todayStr = getTodayISODate();
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
@@ -116,10 +116,8 @@ export const TimeTrackingTab: React.FC<TimeTrackingTabProps> = ({
     }, 0);
   }, [monthEntries, todayStr, liveStats.workSeconds]);
 
-  const monthLabel = new Date(`${todayStr}T12:00:00`).toLocaleDateString(locale, {
-    month: 'long',
-    year: 'numeric',
-  });
+  const todayDateObj = new Date(`${todayStr}T12:00:00`);
+  const monthLabel = `${months[todayDateObj.getMonth()] ?? ''} ${todayDateObj.getFullYear()}`;
 
   const pdfMonthLabel = new Date(`${todayStr}T12:00:00`).toLocaleDateString(
     PDF_LABELS[docLanguage].locale,

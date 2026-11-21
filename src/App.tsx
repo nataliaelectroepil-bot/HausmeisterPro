@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, X } from 'lucide-react';
 import { AdminDispatcherTab } from './components/AdminDispatcherTab';
 import { BinsTab } from './components/BinsTab';
 import { BottomNav } from './components/BottomNav';
@@ -20,7 +21,7 @@ import { UebergabeModule } from './components/modules/UebergabeModule';
 import { WinterdienstModule } from './components/modules/WinterdienstModule';
 import { ZaehlerstandModule } from './components/modules/ZaehlerstandModule';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
-import { pocketbaseService } from './services/pocketbaseService';
+import { pb, pocketbaseService } from './services/pocketbaseService';
 import {
   ActiveTab,
   AppNotification,
@@ -79,6 +80,7 @@ export default function App() {
   const [gardenLogs, setGardenLogs] = useState<GardenLog[]>([]);
 
   const [loaded, setLoaded] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('karte');
   const [moduleObjectId, setModuleObjectId] = useState<string | undefined>(undefined);
@@ -112,52 +114,107 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Load initial data from PocketBase service layer
+  // Subscribe to PocketBase API error events so no backend error is ever silently swallowed
+  useEffect(() => {
+    return pocketbaseService.subscribePbErrors((message) => {
+      setApiError(message);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!apiError) return;
+    const timer = window.setTimeout(() => {
+      setApiError(null);
+    }, 9000);
+    return () => window.clearTimeout(timer);
+  }, [apiError]);
+
+  const fetchAllCollections = useCallback(async (authenticatedUser?: User | null) => {
+    const [u, o, t, b, te, n, wl, mr, hp, cl, gl] = await Promise.all([
+      pocketbaseService.getUsers(),
+      pocketbaseService.getObjects(),
+      pocketbaseService.getTasks(),
+      pocketbaseService.getBinSchedules(),
+      pocketbaseService.getTimeEntries(),
+      pocketbaseService.getNotifications(),
+      pocketbaseService.getWinterLogs(),
+      pocketbaseService.getMeterReadings(),
+      pocketbaseService.getHandoverProtocols(),
+      pocketbaseService.getCleaningLogs(),
+      pocketbaseService.getGardenLogs(),
+    ]);
+    const mergedUsers =
+      authenticatedUser && !u.some((usr) => usr.id === authenticatedUser.id)
+        ? [...u, authenticatedUser]
+        : u;
+    setUsers(mergedUsers);
+    setObjects(o);
+    setTasks(t);
+    setBinSchedules(b);
+    setTimeEntries(te);
+    setNotifications(n);
+    setWinterLogs(wl);
+    setMeterReadings(mr);
+    setHandoverProtocols(hp);
+    setCleaningLogs(cl);
+    setGardenLogs(gl);
+    return mergedUsers;
+  }, []);
+
+  // Restore persisted session on boot (F5) and load initial data
   useEffect(() => {
     let active = true;
     async function loadAll() {
-      const [u, o, t, b, te, n, wl, mr, hp, cl, gl] = await Promise.all([
-        pocketbaseService.getUsers(),
-        pocketbaseService.getObjects(),
-        pocketbaseService.getTasks(),
-        pocketbaseService.getBinSchedules(),
-        pocketbaseService.getTimeEntries(),
-        pocketbaseService.getNotifications(),
-        pocketbaseService.getWinterLogs(),
-        pocketbaseService.getMeterReadings(),
-        pocketbaseService.getHandoverProtocols(),
-        pocketbaseService.getCleaningLogs(),
-        pocketbaseService.getGardenLogs(),
-      ]);
-      if (!active) return;
-      setUsers(u);
-      setObjects(o);
-      setTasks(t);
-      setBinSchedules(b);
-      setTimeEntries(te);
-      setNotifications(n);
-      setWinterLogs(wl);
-      setMeterReadings(mr);
-      setHandoverProtocols(hp);
-      setCleaningLogs(cl);
-      setGardenLogs(gl);
-      if (currentUserId) {
-        const matched = u.find((usr) => usr.id === currentUserId);
-        if (matched?.language) {
-          setUiLanguage(matched.language);
-          pocketbaseService.setSavedUiLanguage(matched.language);
+      try {
+        const restoredUser = await pocketbaseService.restoreSession();
+        if (!active) return;
+
+        if (restoredUser) {
+          setUsers((prev) =>
+            prev.some((u) => u.id === restoredUser.id) ? prev : [...prev, restoredUser]
+          );
+          setCurrentUserId(restoredUser.id);
+          if (restoredUser.language) {
+            setUiLanguage(restoredUser.language);
+            pocketbaseService.setSavedUiLanguage(restoredUser.language);
+          }
+        }
+
+        if (pocketbaseService.isPocketBaseEnabled() && !restoredUser && !pb.authStore.isValid) {
+          return;
+        }
+
+        const mergedUsers = await fetchAllCollections(restoredUser);
+        if (!active) return;
+
+        if (restoredUser) {
+          const matched = mergedUsers.find((usr) => usr.id === restoredUser.id);
+          if (matched?.language) {
+            setUiLanguage(matched.language);
+            pocketbaseService.setSavedUiLanguage(matched.language);
+          }
+        }
+      } catch (err) {
+        if (!active) return;
+        const msg =
+          err instanceof Error ? err.message : 'Greška pri učitavanju podataka s poslužitelja.';
+        setApiError(msg);
+      } finally {
+        if (active) {
+          setLoaded(true);
         }
       }
-      setLoaded(true);
     }
-    loadAll();
+    void loadAll();
     return () => {
       active = false;
     };
-  }, []);
+  }, [fetchAllCollections]);
 
   const currentUser = useMemo(
-    () => users.find((u) => u.id === currentUserId) ?? null,
+    () =>
+      users.find((u) => u.id === currentUserId) ??
+      (pb.authStore.model?.id === currentUserId ? pb.authStore.model : null),
     [users, currentUserId]
   );
 
@@ -208,38 +265,23 @@ export default function App() {
     pocketbaseService.setCompanyDocLanguage(lang);
   }, []);
 
-  const handleLogin = (user: User) => {
+  const handleLogin = async (user: User) => {
     pocketbaseService.setCurrentUserId(user.id);
     setUsers((prev) => (prev.some((u) => u.id === user.id) ? prev : [...prev, user]));
     setCurrentUserId(user.id);
+    setApiError(null);
     if (user.language) {
       setUiLanguage(user.language);
       pocketbaseService.setSavedUiLanguage(user.language);
     }
     if (pocketbaseService.isPocketBaseEnabled()) {
-      void Promise.all([
-        pocketbaseService.getUsers(),
-        pocketbaseService.getObjects(),
-        pocketbaseService.getTasks(),
-        pocketbaseService.getBinSchedules(),
-        pocketbaseService.getTimeEntries(),
-        pocketbaseService.getWinterLogs(),
-        pocketbaseService.getMeterReadings(),
-        pocketbaseService.getHandoverProtocols(),
-        pocketbaseService.getCleaningLogs(),
-        pocketbaseService.getGardenLogs(),
-      ]).then(([u, o, t, b, te, wl, mr, hp, cl, gl]) => {
-        setUsers(u.some((usr) => usr.id === user.id) ? u : [...u, user]);
-        setObjects(o);
-        setTasks(t);
-        setBinSchedules(b);
-        setTimeEntries(te);
-        setWinterLogs(wl);
-        setMeterReadings(mr);
-        setHandoverProtocols(hp);
-        setCleaningLogs(cl);
-        setGardenLogs(gl);
-      });
+      try {
+        await fetchAllCollections(user);
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : 'Greška pri učitavanju PocketBase podataka.';
+        setApiError(msg);
+      }
     }
     setActiveTab('karte');
   };
@@ -247,6 +289,18 @@ export default function App() {
   const handleLogout = () => {
     pocketbaseService.clearAuth();
     setCurrentUserId(null);
+    if (pocketbaseService.isPocketBaseEnabled()) {
+      setUsers([]);
+      setObjects([]);
+      setTasks([]);
+      setBinSchedules([]);
+      setTimeEntries([]);
+      setWinterLogs([]);
+      setMeterReadings([]);
+      setHandoverProtocols([]);
+      setCleaningLogs([]);
+      setGardenLogs([]);
+    }
   };
 
   const handleUpdateTask = useCallback(
@@ -351,6 +405,24 @@ export default function App() {
       onChangeLanguage={handleChangeLanguage}
       onChangeDocLanguage={handleChangeDocLanguage}
     >
+      {apiError && (
+        <div
+          role="alert"
+          className="fixed top-4 right-4 z-[100] max-w-md flex items-start gap-2.5 rounded-xl border border-red-500/40 bg-red-950/95 px-4 py-3 text-xs sm:text-sm font-medium text-red-100 shadow-2xl backdrop-blur-md"
+        >
+          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+          <span className="flex-1 break-words">{apiError}</span>
+          <button
+            type="button"
+            onClick={() => setApiError(null)}
+            aria-label="Zatvori"
+            className="text-red-300 hover:text-white cursor-pointer shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {!loaded ? (
         <LoadingScreen />
       ) : !currentUser ? (

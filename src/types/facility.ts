@@ -1,6 +1,6 @@
 export type UserRole = 'worker' | 'admin' | 'client_hausverwaltung';
 
-export type LanguageCode = 'DE' | 'HR' | 'SQ' | 'EN' | 'PL' | 'TR';
+export type LanguageCode = 'DE' | 'HR' | 'SQ' | 'EN' | 'PL' | 'TR' | 'RU';
 export type DocLanguageCode = 'DE' | 'EN' | 'HR' | 'SQ';
 
 export interface User {

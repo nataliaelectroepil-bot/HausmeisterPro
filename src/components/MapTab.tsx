@@ -59,6 +59,19 @@ function createPinIcon(color: 'red' | 'blue' | 'green', selected: boolean) {
   });
 }
 
+const GERMANY_DEFAULT_CENTER: [number, number] = [51.1657, 10.4515];
+const GERMANY_DEFAULT_ZOOM = 6;
+
+function hasValidCoords(obj: PropertyObject): boolean {
+  return (
+    typeof obj.lat === 'number' &&
+    typeof obj.lng === 'number' &&
+    Number.isFinite(obj.lat) &&
+    Number.isFinite(obj.lng) &&
+    !(obj.lat === 0 && obj.lng === 0)
+  );
+}
+
 export const MapTab: React.FC<MapTabProps> = ({
   objects,
   tasks,
@@ -77,6 +90,20 @@ export const MapTab: React.FC<MapTabProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const hasAutoSelectedRef = useRef(Boolean(objects[0]?.id));
+
+  const validObjects = useMemo(() => objects.filter(hasValidCoords), [objects]);
+  const objectsViewportKey = useMemo(
+    () => validObjects.map((o) => `${o.id}:${o.lat}:${o.lng}`).join('|'),
+    [validObjects]
+  );
+
+  useEffect(() => {
+    if (!hasAutoSelectedRef.current && objects.length > 0) {
+      setSelectedObjectId(objects[0].id);
+      hasAutoSelectedRef.current = true;
+    }
+  }, [objects]);
 
   const tasksByObject = useMemo(() => {
     const map = new Map<string, FacilityTask[]>();
@@ -100,25 +127,23 @@ export const MapTab: React.FC<MapTabProps> = ({
     );
   }, [objects, searchQuery]);
 
-  // Initialize Leaflet Map
+  // Initialize Leaflet Map cleanly whenever 'karte' view mounts
   useEffect(() => {
     if (viewMode !== 'karte' || !mapContainerRef.current) return;
 
-    if (!mapInstanceRef.current) {
-      const map = L.map(mapContainerRef.current, {
-        center: [48.146, 11.572],
-        zoom: 12,
-        zoomControl: true,
-      });
+    const map = L.map(mapContainerRef.current, {
+      center: GERMANY_DEFAULT_CENTER,
+      zoom: GERMANY_DEFAULT_ZOOM,
+      zoomControl: true,
+    });
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap',
-        maxZoom: 19,
-      }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap',
+      maxZoom: 19,
+    }).addTo(map);
 
-      markersLayerRef.current = L.layerGroup().addTo(map);
-      mapInstanceRef.current = map;
-    }
+    markersLayerRef.current = L.layerGroup().addTo(map);
+    mapInstanceRef.current = map;
 
     const timer = window.setTimeout(() => {
       mapInstanceRef.current?.invalidateSize();
@@ -126,19 +151,36 @@ export const MapTab: React.FC<MapTabProps> = ({
 
     return () => {
       window.clearTimeout(timer);
+      map.remove();
+      mapInstanceRef.current = null;
+      markersLayerRef.current = null;
     };
   }, [viewMode]);
 
-  // Destroy map cleanly on unmount
+  // Auto-center & zoom on loaded objects (fallback to Germany only if no objects exist)
   useEffect(() => {
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-        markersLayerRef.current = null;
+    const map = mapInstanceRef.current;
+    if (viewMode !== 'karte' || !map) return;
+
+    const applyViewport = () => {
+      if (!mapInstanceRef.current) return;
+      mapInstanceRef.current.invalidateSize();
+      if (validObjects.length === 0) {
+        mapInstanceRef.current.setView(GERMANY_DEFAULT_CENTER, GERMANY_DEFAULT_ZOOM);
+      } else if (validObjects.length === 1) {
+        mapInstanceRef.current.setView([validObjects[0].lat, validObjects[0].lng], 15);
+      } else {
+        const bounds = L.latLngBounds(
+          validObjects.map((o) => [o.lat, o.lng] as [number, number])
+        );
+        mapInstanceRef.current.fitBounds(bounds, { padding: [48, 48], maxZoom: 15 });
       }
     };
-  }, []);
+
+    applyViewport();
+    const timer = window.setTimeout(applyViewport, 120);
+    return () => window.clearTimeout(timer);
+  }, [objectsViewportKey, viewMode, validObjects]);
 
   // Update markers whenever objects, tasks, or selection change
   useEffect(() => {
@@ -146,7 +188,7 @@ export const MapTab: React.FC<MapTabProps> = ({
     const layer = markersLayerRef.current;
     layer.clearLayers();
 
-    objects.forEach((obj) => {
+    validObjects.forEach((obj) => {
       const objTasks = tasksByObject.get(obj.id) || [];
       const color = getPinColorForObject(objTasks);
       const marker = L.marker([obj.lat, obj.lng], {
@@ -158,7 +200,7 @@ export const MapTab: React.FC<MapTabProps> = ({
       });
       marker.addTo(layer);
     });
-  }, [objects, tasksByObject, selectedObjectId, viewMode]);
+  }, [validObjects, tasksByObject, selectedObjectId, viewMode]);
 
   const selectedObject = objects.find((o) => o.id === selectedObjectId) ?? null;
   const selectedObjectTasks = selectedObject

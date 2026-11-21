@@ -48,51 +48,179 @@ export const pocketbaseConfig = {
   },
 };
 
-let inMemoryAuthToken: string | null = null;
-let inMemoryAuthModel: User | null = null;
+const AUTH_STORAGE_KEY = 'hmpro_pb_auth_v1';
+
+interface PersistedAuthState {
+  token: string;
+  model: User | null;
+}
+
+function readPersistedAuth(): PersistedAuthState {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return { token: '', model: null };
+    const parsed = JSON.parse(raw) as Partial<PersistedAuthState>;
+    return {
+      token: typeof parsed.token === 'string' ? parsed.token : '',
+      model: parsed.model && typeof parsed.model === 'object' ? parsed.model : null,
+    };
+  } catch {
+    return { token: '', model: null };
+  }
+}
+
+function writePersistedAuth(token: string, model: User | null): void {
+  try {
+    if (!token) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ token, model }));
+  } catch {
+    // Ignore storage quota issues safely
+  }
+}
+
+const initialPersistedAuth = readPersistedAuth();
+let persistedAuthToken: string = initialPersistedAuth.token;
+let persistedAuthModel: User | null = initialPersistedAuth.model;
+
+export class PocketBaseApiError extends Error {
+  status: number;
+  details?: Record<string, unknown>;
+
+  constructor(message: string, status: number, details?: Record<string, unknown>) {
+    super(message);
+    this.name = 'PocketBaseApiError';
+    this.status = status;
+    this.details = details;
+  }
+}
+
+type PbErrorListener = (message: string) => void;
+const pbErrorListeners = new Set<PbErrorListener>();
+
+function emitPbError(message: string): void {
+  pbErrorListeners.forEach((listener) => {
+    try {
+      listener(message);
+    } catch {
+      // ignore listener errors
+    }
+  });
+}
+
+function extractPocketBaseErrorMessage(
+  status: number,
+  statusText: string,
+  rawBody: string
+): { message: string; details?: Record<string, unknown> } {
+  if (!rawBody) {
+    return { message: `PocketBase greška (HTTP ${status}${statusText ? ` ${statusText}` : ''})` };
+  }
+  try {
+    const parsed = JSON.parse(rawBody) as {
+      message?: string;
+      data?: Record<string, { code?: string; message?: string } | unknown>;
+    };
+    const baseMsg =
+      typeof parsed.message === 'string' && parsed.message.trim()
+        ? parsed.message.trim()
+        : `PocketBase greška (HTTP ${status})`;
+    const fieldErrors: string[] = [];
+    if (parsed.data && typeof parsed.data === 'object') {
+      for (const [field, val] of Object.entries(parsed.data)) {
+        if (val && typeof val === 'object' && 'message' in val) {
+          const fieldMsg = String((val as { message?: unknown }).message || '').trim();
+          if (fieldMsg) {
+            fieldErrors.push(`${field}: ${fieldMsg}`);
+          }
+        }
+      }
+    }
+    const fullMessage =
+      fieldErrors.length > 0 ? `${baseMsg} (${fieldErrors.join('; ')})` : baseMsg;
+    return { message: fullMessage, details: parsed.data };
+  } catch {
+    return { message: rawBody.slice(0, 300) || `PocketBase greška (HTTP ${status})` };
+  }
+}
 
 export const pb = {
   authStore: {
     get token(): string {
-      return inMemoryAuthToken ?? '';
+      return persistedAuthToken;
     },
     get model(): User | null {
-      return inMemoryAuthModel;
+      return persistedAuthModel;
     },
     get isValid(): boolean {
-      return Boolean(inMemoryAuthToken && inMemoryAuthModel);
+      return Boolean(persistedAuthToken && persistedAuthModel);
     },
     save(token: string, model: User | null): void {
-      inMemoryAuthToken = token || null;
-      inMemoryAuthModel = model;
+      persistedAuthToken = token || '';
+      persistedAuthModel = model;
+      writePersistedAuth(persistedAuthToken, persistedAuthModel);
     },
     clear(): void {
-      inMemoryAuthToken = null;
-      inMemoryAuthModel = null;
+      persistedAuthToken = '';
+      persistedAuthModel = null;
+      writePersistedAuth('', null);
     },
   },
 };
 
 /**
- * Optional PocketBase REST helper.
- * Automatically active when VITE_POCKETBASE_URL is configured; otherwise falls back to local persistence.
+ * PocketBase REST helper.
+ * Active when VITE_POCKETBASE_URL is configured; throws and emits errors on failure instead of swallowing them.
  */
 async function pbRequest<T>(path: string, init?: RequestInit): Promise<T | null> {
-  if (!pocketbaseConfig.baseUrl) return null;
+  if (!pocketbaseConfig.baseUrl.trim()) return null;
+  const url = `${pocketbaseConfig.baseUrl.replace(/\/$/, '')}${path}`;
+  let res: Response;
   try {
-    const res = await fetch(`${pocketbaseConfig.baseUrl.replace(/\/$/, '')}${path}`, {
+    res = await fetch(url, {
+      ...init,
       headers: {
         'Content-Type': 'application/json',
         ...(pb.authStore.token ? { Authorization: `Bearer ${pb.authStore.token}` } : {}),
         ...(init?.headers || {}),
       },
-      ...init,
     });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
+  } catch (err) {
+    const netMsg =
+      err instanceof Error ? err.message : 'Mrežna greška pri spajanju na PocketBase server.';
+    const fullMsg = `PocketBase veza nije uspjela: ${netMsg}`;
+    emitPbError(fullMsg);
+    throw new PocketBaseApiError(fullMsg, 0);
   }
+
+  if (!res.ok) {
+    const rawBody = await res.text().catch(() => '');
+    const { message, details } = extractPocketBaseErrorMessage(res.status, res.statusText, rawBody);
+    emitPbError(message);
+    throw new PocketBaseApiError(message, res.status, details);
+  }
+
+  if (res.status === 204) {
+    return undefined as unknown as T;
+  }
+  const text = await res.text();
+  if (!text) {
+    return undefined as unknown as T;
+  }
+  return JSON.parse(text) as T;
+}
+
+function normalizeTaskRecord(task: FacilityTask): FacilityTask {
+  return {
+    ...task,
+    checklist_json: Array.isArray(task.checklist_json) ? task.checklist_json : [],
+    photos: Array.isArray(task.photos) ? task.photos : [],
+    bin_types: Array.isArray(task.bin_types) && task.bin_types.length > 0 ? task.bin_types : undefined,
+    notes: typeof task.notes === 'string' ? task.notes : '',
+    description: typeof task.description === 'string' ? task.description : '',
+  };
 }
 
 function isoDateOffset(daysOffset: number): string {
@@ -894,6 +1022,13 @@ export const pocketbaseService = {
     return Boolean(pocketbaseConfig.baseUrl.trim());
   },
 
+  subscribePbErrors(listener: PbErrorListener): () => void {
+    pbErrorListeners.add(listener);
+    return () => {
+      pbErrorListeners.delete(listener);
+    };
+  },
+
   getAuthToken(): string | null {
     return pb.authStore.token || null;
   },
@@ -901,6 +1036,94 @@ export const pocketbaseService = {
   clearAuth(): void {
     pb.authStore.clear();
     this.setCurrentUserId(null);
+  },
+
+  async restoreSession(): Promise<User | null> {
+    const token = pb.authStore.token;
+    if (!token) return null;
+
+    if (this.isPocketBaseEnabled()) {
+      const baseUrl = pocketbaseConfig.baseUrl.replace(/\/$/, '');
+      try {
+        const res = await fetch(
+          `${baseUrl}/api/collections/${pocketbaseConfig.collections.users}/auth-refresh`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (res.status === 401 || res.status === 403) {
+          this.clearAuth();
+          return null;
+        }
+
+        if (!res.ok) {
+          const rawBody = await res.text().catch(() => '');
+          const { message } = extractPocketBaseErrorMessage(res.status, res.statusText, rawBody);
+          emitPbError(message);
+          return pb.authStore.model;
+        }
+
+        const data = (await res.json()) as { token?: string; record?: User };
+        if (data.record) {
+          const nextToken = data.token || token;
+          pb.authStore.save(nextToken, data.record);
+          this.setCurrentUserId(data.record.id);
+          return data.record;
+        }
+        this.clearAuth();
+        return null;
+      } catch (err) {
+        const netMsg =
+          err instanceof Error ? err.message : 'Server nije dostupan.';
+        emitPbError(`PocketBase auth-refresh nije uspio: ${netMsg}`);
+        return pb.authStore.model;
+      }
+    }
+
+    try {
+      const res = await fetch('/api/auth/session', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (res.status === 401 || res.status === 403) {
+        this.clearAuth();
+        return null;
+      }
+      if (!res.ok) {
+        return pb.authStore.model;
+      }
+      const data = (await res.json()) as {
+        user?: { id: string; email: string; role: User['role'] };
+      };
+      if (!data.user) {
+        this.clearAuth();
+        return null;
+      }
+      const usersList = await this.getUsers();
+      const matched =
+        usersList.find((u) => u.id === data.user?.id) ??
+        pb.authStore.model ?? {
+          id: data.user.id,
+          employee_id: 'HM-101',
+          name: 'Administrator',
+          email: data.user.email,
+          role: data.user.role,
+          phone: '',
+          region: 'Einsatzleitung',
+          language: 'DE' as LanguageCode,
+        };
+      pb.authStore.save(token, matched);
+      this.setCurrentUserId(matched.id);
+      return matched;
+    } catch {
+      return pb.authStore.model;
+    }
   },
 
   async getAuthStatus(): Promise<{
@@ -944,13 +1167,19 @@ export const pocketbaseService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      const data = (await res.json()) as { token?: string; user?: { id: string; email: string; role: User['role'] }; error?: string };
+      const data = (await res.json()) as {
+        token?: string;
+        user?: { id: string; email: string; role: User['role'] };
+        error?: string;
+      };
       if (!res.ok || !data.token || !data.user) {
         return { ok: false, error: data.error || 'SETUP_FAILED' };
       }
       const usersList = await this.getUsers();
       const matched =
-        usersList.find((u) => u.id === data.user?.id || u.email.toLowerCase() === data.user?.email.toLowerCase()) ?? {
+        usersList.find(
+          (u) => u.id === data.user?.id || u.email.toLowerCase() === data.user?.email.toLowerCase()
+        ) ?? {
           id: data.user.id,
           employee_id: 'HM-101',
           name: 'Administrator',
@@ -982,14 +1211,21 @@ export const pocketbaseService = {
             body: JSON.stringify({ identity: normalizedEmail, password }),
           }
         );
+        if (!res.ok) {
+          const rawBody = await res.text().catch(() => '');
+          const { message } = extractPocketBaseErrorMessage(res.status, res.statusText, rawBody);
+          return { ok: false, error: message };
+        }
         const data = (await res.json()) as { token?: string; record?: User };
-        if (!res.ok || !data.token || !data.record) {
+        if (!data.token || !data.record) {
           return { ok: false, error: 'INVALID_CREDENTIALS' };
         }
         pb.authStore.save(data.token, data.record);
         return { ok: true, user: data.record };
-      } catch {
-        return { ok: false, error: 'NETWORK_ERROR' };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'NETWORK_ERROR';
+        emitPbError(`PocketBase prijava nije uspjela: ${msg}`);
+        return { ok: false, error: msg };
       }
     }
 
@@ -1060,10 +1296,12 @@ export const pocketbaseService = {
 
   // Users & Session
   async getUsers(): Promise<User[]> {
-    const remote = await pbRequest<{ items: User[] }>(
-      `/api/collections/${pocketbaseConfig.collections.users}/records`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const remote = await pbRequest<{ items: User[] }>(
+        `/api/collections/${pocketbaseConfig.collections.users}/records?perPage=200`
+      );
+      return remote?.items ?? [];
+    }
     const seed = buildSeedData();
     const stored = readStorage<User[]>(STORAGE_KEYS.users, seed.users);
     const needsAdminEmailSync = stored.some(
@@ -1082,7 +1320,7 @@ export const pocketbaseService = {
   },
 
   getCurrentUserId(): string | null {
-    return null;
+    return pb.authStore.model?.id ?? null;
   },
 
   setCurrentUserId(userId: string | null): void {
@@ -1098,10 +1336,17 @@ export const pocketbaseService = {
   },
 
   async updateUserLanguage(userId: string, language: LanguageCode): Promise<User[]> {
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.users}/records/${userId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ language }),
-    });
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(`/api/collections/${pocketbaseConfig.collections.users}/records/${userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ language }),
+      });
+      if (pb.authStore.model?.id === userId) {
+        pb.authStore.save(pb.authStore.token, { ...pb.authStore.model, language });
+      }
+      this.setSavedUiLanguage(language);
+      return this.getUsers();
+    }
     const list = await this.getUsers();
     const updated = list.map((u) => (u.id === userId ? { ...u, language } : u));
     writeStorage(STORAGE_KEYS.users, updated);
@@ -1112,7 +1357,7 @@ export const pocketbaseService = {
   getSavedUiLanguage(): LanguageCode {
     try {
       const val = localStorage.getItem(STORAGE_KEYS.uiLanguage);
-      if (val && ['DE', 'HR', 'SQ', 'EN', 'PL', 'TR'].includes(val)) {
+      if (val && ['DE', 'HR', 'SQ', 'EN', 'PL', 'TR', 'RU'].includes(val)) {
         return val as LanguageCode;
       }
       return 'DE';
@@ -1151,23 +1396,58 @@ export const pocketbaseService = {
 
   // Objects
   async getObjects(): Promise<PropertyObject[]> {
-    const remote = await pbRequest<{ items: PropertyObject[] }>(
-      `/api/collections/${pocketbaseConfig.collections.objects}/records`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const remote = await pbRequest<{ items: PropertyObject[] }>(
+        `/api/collections/${pocketbaseConfig.collections.objects}/records?perPage=200`
+      );
+      return (remote?.items ?? []).map((obj) => ({
+        ...obj,
+        lat: Number(obj.lat),
+        lng: Number(obj.lng),
+        units_count: Number(obj.units_count) || 0,
+      }));
+    }
     const seed = buildSeedData();
     return readStorage<PropertyObject[]>(STORAGE_KEYS.objects, seed.objects);
   },
 
   async createObject(input: Omit<PropertyObject, 'id'>): Promise<PropertyObject> {
+    if (this.isPocketBaseEnabled()) {
+      const hasValidClientId =
+        Boolean(input.client_id) && !/^u\d+$/.test(input.client_id);
+      const pbPayload: Record<string, unknown> = {
+        name: input.name,
+        address: input.address,
+        lat: Number(input.lat),
+        lng: Number(input.lng),
+        client_name: input.client_name || '',
+        units_count: Number(input.units_count) || 0,
+      };
+      if (hasValidClientId) {
+        pbPayload.client_id = input.client_id;
+      }
+      const createdRemote = await pbRequest<PropertyObject>(
+        `/api/collections/${pocketbaseConfig.collections.objects}/records`,
+        {
+          method: 'POST',
+          body: JSON.stringify(pbPayload),
+        }
+      );
+      if (!createdRemote) {
+        throw new PocketBaseApiError('Objekt nije spremljen na PocketBase server.', 500);
+      }
+      return {
+        ...createdRemote,
+        lat: Number(createdRemote.lat),
+        lng: Number(createdRemote.lng),
+        units_count: Number(createdRemote.units_count) || 0,
+      };
+    }
+
     const created: PropertyObject = {
       ...input,
       id: `obj_${Date.now()}`,
     };
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.objects}/records`, {
-      method: 'POST',
-      body: JSON.stringify(created),
-    });
     const list = await this.getObjects();
     const updated = [...list, created];
     writeStorage(STORAGE_KEYS.objects, updated);
@@ -1176,28 +1456,45 @@ export const pocketbaseService = {
 
   // Tasks
   async getTasks(): Promise<FacilityTask[]> {
-    const remote = await pbRequest<{ items: FacilityTask[] }>(
-      `/api/collections/${pocketbaseConfig.collections.tasks}/records`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const remote = await pbRequest<{ items: FacilityTask[] }>(
+        `/api/collections/${pocketbaseConfig.collections.tasks}/records?perPage=200`
+      );
+      return (remote?.items ?? []).map(normalizeTaskRecord);
+    }
     const seed = buildSeedData();
     return readStorage<FacilityTask[]>(STORAGE_KEYS.tasks, seed.tasks);
   },
 
   async createTask(input: Omit<FacilityTask, 'id' | 'created_at'>): Promise<FacilityTask> {
-    if (this.isPocketBaseEnabled() && pb.authStore.token) {
+    if (this.isPocketBaseEnabled()) {
+      const pbPayload: Record<string, unknown> = {
+        title: input.title,
+        description: input.description ?? '',
+        category: input.category,
+        status: input.status || 'offen',
+        priority: input.priority || 'normal',
+        due_date: input.due_date,
+        object_id: input.object_id,
+        assigned_to: input.assigned_to || pb.authStore.model?.id || '',
+        checklist_json: input.checklist_json ?? [],
+        notes: input.notes ?? '',
+        photos: input.photos ?? [],
+      };
+      if (input.bin_types && input.bin_types.length > 0) {
+        pbPayload.bin_types = input.bin_types;
+      }
       const remoteCreated = await pbRequest<FacilityTask>(
         `/api/collections/${pocketbaseConfig.collections.tasks}/records`,
         {
           method: 'POST',
-          body: JSON.stringify(input),
+          body: JSON.stringify(pbPayload),
         }
       );
-      if (remoteCreated) {
-        const list = await this.getTasks();
-        writeStorage(STORAGE_KEYS.tasks, list);
-        return remoteCreated;
+      if (!remoteCreated) {
+        throw new PocketBaseApiError('Zadatak nije spremljen na PocketBase server.', 500);
       }
+      return normalizeTaskRecord(remoteCreated);
     }
 
     const created: FacilityTask = {
@@ -1205,10 +1502,6 @@ export const pocketbaseService = {
       id: `task_${Date.now()}`,
       created_at: new Date().toISOString(),
     };
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.tasks}/records`, {
-      method: 'POST',
-      body: JSON.stringify(created),
-    });
     const list = await this.getTasks();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.tasks, updated);
@@ -1216,10 +1509,13 @@ export const pocketbaseService = {
   },
 
   async updateTask(id: string, patch: Partial<FacilityTask>): Promise<FacilityTask[]> {
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.tasks}/records/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-    });
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(`/api/collections/${pocketbaseConfig.collections.tasks}/records/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+      return this.getTasks();
+    }
     const list = await this.getTasks();
     const updated = list.map((t) => (t.id === id ? { ...t, ...patch } : t));
     writeStorage(STORAGE_KEYS.tasks, updated);
@@ -1227,9 +1523,12 @@ export const pocketbaseService = {
   },
 
   async deleteTask(id: string): Promise<FacilityTask[]> {
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.tasks}/records/${id}`, {
-      method: 'DELETE',
-    });
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(`/api/collections/${pocketbaseConfig.collections.tasks}/records/${id}`, {
+        method: 'DELETE',
+      });
+      return this.getTasks();
+    }
     const list = await this.getTasks();
     const updated = list.filter((t) => t.id !== id);
     writeStorage(STORAGE_KEYS.tasks, updated);
@@ -1238,15 +1537,29 @@ export const pocketbaseService = {
 
   // Bin Schedules
   async getBinSchedules(): Promise<BinSchedule[]> {
-    const remote = await pbRequest<{ items: BinSchedule[] }>(
-      `/api/collections/${pocketbaseConfig.collections.bin_schedules}/records`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const remote = await pbRequest<{ items: BinSchedule[] }>(
+        `/api/collections/${pocketbaseConfig.collections.bin_schedules}/records?perPage=200`
+      );
+      return remote?.items ?? [];
+    }
     const seed = buildSeedData();
     return readStorage<BinSchedule[]>(STORAGE_KEYS.bins, seed.binSchedules);
   },
 
   async createBinSchedules(items: Array<Omit<BinSchedule, 'id'>>): Promise<BinSchedule[]> {
+    if (this.isPocketBaseEnabled()) {
+      for (const item of items) {
+        await pbRequest(
+          `/api/collections/${pocketbaseConfig.collections.bin_schedules}/records`,
+          {
+            method: 'POST',
+            body: JSON.stringify(item),
+          }
+        );
+      }
+      return this.getBinSchedules();
+    }
     const existing = await this.getBinSchedules();
     const created = items.map((item, idx) => ({
       ...item,
@@ -1258,10 +1571,16 @@ export const pocketbaseService = {
   },
 
   async updateBinSchedule(id: string, patch: Partial<BinSchedule>): Promise<BinSchedule[]> {
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.bin_schedules}/records/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-    });
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(
+        `/api/collections/${pocketbaseConfig.collections.bin_schedules}/records/${id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(patch),
+        }
+      );
+      return this.getBinSchedules();
+    }
     const list = await this.getBinSchedules();
     const updated = list.map((b) => (b.id === id ? { ...b, ...patch } : b));
     writeStorage(STORAGE_KEYS.bins, updated);
@@ -1270,15 +1589,17 @@ export const pocketbaseService = {
 
   // Time Entries
   async getTimeEntries(): Promise<TimeEntry[]> {
-    const activeUser = pb.authStore.model;
-    const filterParam =
-      activeUser && activeUser.role !== 'admin'
-        ? `&filter=${encodeURIComponent(`user_id="${activeUser.id}"`)}`
-        : '';
-    const remote = await pbRequest<{ items: TimeEntry[] }>(
-      `/api/collections/${pocketbaseConfig.collections.time_entries}/records?perPage=200&sort=-date${filterParam}`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const activeUser = pb.authStore.model;
+      const filterParam =
+        activeUser && activeUser.role !== 'admin'
+          ? `&filter=${encodeURIComponent(`user_id="${activeUser.id}"`)}`
+          : '';
+      const remote = await pbRequest<{ items: TimeEntry[] }>(
+        `/api/collections/${pocketbaseConfig.collections.time_entries}/records?perPage=200${filterParam}`
+      );
+      return remote?.items ?? [];
+    }
     const seed = buildSeedData();
     return readStorage<TimeEntry[]>(STORAGE_KEYS.timeEntries, seed.timeEntries);
   },
@@ -1287,32 +1608,28 @@ export const pocketbaseService = {
     const activeUserId = pb.authStore.model?.id || entry.user_id;
     const boundEntry: TimeEntry = { ...entry, user_id: activeUserId };
 
-    if (this.isPocketBaseEnabled() && pb.authStore.token) {
+    if (this.isPocketBaseEnabled()) {
       const isLocalTempId = boundEntry.id.startsWith('te_');
       if (!isLocalTempId) {
-        const patched = await pbRequest<TimeEntry>(
+        await pbRequest<TimeEntry>(
           `/api/collections/${pocketbaseConfig.collections.time_entries}/records/${boundEntry.id}`,
           {
             method: 'PATCH',
             body: JSON.stringify(boundEntry),
           }
         );
-        if (patched) {
-          return this.getTimeEntries();
-        }
+        return this.getTimeEntries();
       }
 
       const { id: _ignoredLocalId, ...createPayload } = boundEntry;
-      const created = await pbRequest<TimeEntry>(
+      await pbRequest<TimeEntry>(
         `/api/collections/${pocketbaseConfig.collections.time_entries}/records`,
         {
           method: 'POST',
           body: JSON.stringify(createPayload),
         }
       );
-      if (created) {
-        return this.getTimeEntries();
-      }
+      return this.getTimeEntries();
     }
 
     const list = await this.getTimeEntries();
@@ -1346,20 +1663,25 @@ export const pocketbaseService = {
 
   // --- MODULE 1: Winterdienst (winter_logs) ---
   async getWinterLogs(): Promise<WinterLog[]> {
-    const remote = await pbRequest<{ items: WinterLog[] }>(
-      `/api/collections/${pocketbaseConfig.collections.winter_logs}/records`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const remote = await pbRequest<{ items: WinterLog[] }>(
+        `/api/collections/${pocketbaseConfig.collections.winter_logs}/records?perPage=200`
+      );
+      return remote?.items ?? [];
+    }
     const seed = buildSeedData();
     return readStorage<WinterLog[]>(STORAGE_KEYS.winterLogs, seed.winterLogs);
   },
 
   async createWinterLog(input: Omit<WinterLog, 'id'>): Promise<WinterLog[]> {
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(`/api/collections/${pocketbaseConfig.collections.winter_logs}/records`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+      return this.getWinterLogs();
+    }
     const created: WinterLog = { ...input, id: `wl_${Date.now()}` };
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.winter_logs}/records`, {
-      method: 'POST',
-      body: JSON.stringify(created),
-    });
     const list = await this.getWinterLogs();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.winterLogs, updated);
@@ -1368,20 +1690,25 @@ export const pocketbaseService = {
 
   // --- MODULE 2: Zählerstände (meter_readings) ---
   async getMeterReadings(): Promise<MeterReading[]> {
-    const remote = await pbRequest<{ items: MeterReading[] }>(
-      `/api/collections/${pocketbaseConfig.collections.meter_readings}/records`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const remote = await pbRequest<{ items: MeterReading[] }>(
+        `/api/collections/${pocketbaseConfig.collections.meter_readings}/records?perPage=200`
+      );
+      return remote?.items ?? [];
+    }
     const seed = buildSeedData();
     return readStorage<MeterReading[]>(STORAGE_KEYS.meterReadings, seed.meterReadings);
   },
 
   async createMeterReading(input: Omit<MeterReading, 'id'>): Promise<MeterReading[]> {
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(`/api/collections/${pocketbaseConfig.collections.meter_readings}/records`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+      return this.getMeterReadings();
+    }
     const created: MeterReading = { ...input, id: `mr_${Date.now()}` };
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.meter_readings}/records`, {
-      method: 'POST',
-      body: JSON.stringify(created),
-    });
     const list = await this.getMeterReadings();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.meterReadings, updated);
@@ -1390,10 +1717,12 @@ export const pocketbaseService = {
 
   // --- MODULE 3: Wohnungsübergabe (handover_protocols) ---
   async getHandoverProtocols(): Promise<HandoverProtocol[]> {
-    const remote = await pbRequest<{ items: HandoverProtocol[] }>(
-      `/api/collections/${pocketbaseConfig.collections.handover_protocols}/records`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const remote = await pbRequest<{ items: HandoverProtocol[] }>(
+        `/api/collections/${pocketbaseConfig.collections.handover_protocols}/records?perPage=200`
+      );
+      return remote?.items ?? [];
+    }
     const seed = buildSeedData();
     return readStorage<HandoverProtocol[]>(STORAGE_KEYS.handoverProtocols, seed.handoverProtocols);
   },
@@ -1401,15 +1730,28 @@ export const pocketbaseService = {
   async createHandoverProtocol(
     input: Omit<HandoverProtocol, 'id' | 'created_at'>
   ): Promise<{ created: HandoverProtocol; all: HandoverProtocol[] }> {
+    if (this.isPocketBaseEnabled()) {
+      const createdRemote = await pbRequest<HandoverProtocol>(
+        `/api/collections/${pocketbaseConfig.collections.handover_protocols}/records`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            ...input,
+            created_at: new Date().toISOString(),
+          }),
+        }
+      );
+      if (!createdRemote) {
+        throw new PocketBaseApiError('Zapisnik nije spremljen na PocketBase server.', 500);
+      }
+      const all = await this.getHandoverProtocols();
+      return { created: createdRemote, all };
+    }
     const created: HandoverProtocol = {
       ...input,
       id: `hp_${Date.now()}`,
       created_at: new Date().toISOString(),
     };
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.handover_protocols}/records`, {
-      method: 'POST',
-      body: JSON.stringify(created),
-    });
     const list = await this.getHandoverProtocols();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.handoverProtocols, updated);
@@ -1418,20 +1760,25 @@ export const pocketbaseService = {
 
   // --- MODULE 4: Gebäudereinigung (cleaning_logs) ---
   async getCleaningLogs(): Promise<CleaningLog[]> {
-    const remote = await pbRequest<{ items: CleaningLog[] }>(
-      `/api/collections/${pocketbaseConfig.collections.cleaning_logs}/records`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const remote = await pbRequest<{ items: CleaningLog[] }>(
+        `/api/collections/${pocketbaseConfig.collections.cleaning_logs}/records?perPage=200`
+      );
+      return remote?.items ?? [];
+    }
     const seed = buildSeedData();
     return readStorage<CleaningLog[]>(STORAGE_KEYS.cleaningLogs, seed.cleaningLogs);
   },
 
   async createCleaningLog(input: Omit<CleaningLog, 'id'>): Promise<CleaningLog[]> {
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(`/api/collections/${pocketbaseConfig.collections.cleaning_logs}/records`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+      return this.getCleaningLogs();
+    }
     const created: CleaningLog = { ...input, id: `cl_${Date.now()}` };
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.cleaning_logs}/records`, {
-      method: 'POST',
-      body: JSON.stringify(created),
-    });
     const list = await this.getCleaningLogs();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.cleaningLogs, updated);
@@ -1440,20 +1787,25 @@ export const pocketbaseService = {
 
   // --- MODULE 5: Garten- & Grünflächenpflege (garden_logs) ---
   async getGardenLogs(): Promise<GardenLog[]> {
-    const remote = await pbRequest<{ items: GardenLog[] }>(
-      `/api/collections/${pocketbaseConfig.collections.garden_logs}/records`
-    );
-    if (remote?.items) return remote.items;
+    if (this.isPocketBaseEnabled()) {
+      const remote = await pbRequest<{ items: GardenLog[] }>(
+        `/api/collections/${pocketbaseConfig.collections.garden_logs}/records?perPage=200`
+      );
+      return remote?.items ?? [];
+    }
     const seed = buildSeedData();
     return readStorage<GardenLog[]>(STORAGE_KEYS.gardenLogs, seed.gardenLogs);
   },
 
   async createGardenLog(input: Omit<GardenLog, 'id'>): Promise<GardenLog[]> {
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(`/api/collections/${pocketbaseConfig.collections.garden_logs}/records`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+      return this.getGardenLogs();
+    }
     const created: GardenLog = { ...input, id: `gl_${Date.now()}` };
-    await pbRequest(`/api/collections/${pocketbaseConfig.collections.garden_logs}/records`, {
-      method: 'POST',
-      body: JSON.stringify(created),
-    });
     const list = await this.getGardenLogs();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.gardenLogs, updated);

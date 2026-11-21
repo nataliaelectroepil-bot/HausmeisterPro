@@ -357,7 +357,7 @@ export const BinsTab: React.FC<BinsTabProps> = ({
                       </span>
                       <span aria-hidden="true">·</span>
                       <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
-                        {formatShortDateDE(bin.pickup_date)}
+                        {formatShortDateDE(bin.pickup_date, locale)}
                       </span>
                       {bin.recurring_group_id && (
                         <>

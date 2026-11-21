@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
   Camera,
@@ -94,24 +94,33 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [dueTime, setDueTime] = useState<string>('10:00');
   const [photos, setPhotos] = useState<TaskPhoto[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [savingObject, setSavingObject] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
   // New Object inline creation + Nominatim geocoding
   const [showNewObjectForm, setShowNewObjectForm] = useState(false);
   const [newObjName, setNewObjName] = useState('');
   const [newObjAddress, setNewObjAddress] = useState('');
-  const [newObjLat, setNewObjLat] = useState<string>('48.1351');
-  const [newObjLng, setNewObjLng] = useState<string>('11.5820');
+  const [newObjLat, setNewObjLat] = useState<string>('');
+  const [newObjLng, setNewObjLng] = useState<string>('');
   const [geocodingLoading, setGeocodingLoading] = useState(false);
   const [geocodingStatus, setGeocodingStatus] = useState<{
     type: 'success' | 'error';
     text: string;
   } | null>(null);
 
+  useEffect(() => {
+    if (!objectId && objects.length > 0) {
+      setObjectId(objects[0].id);
+    }
+  }, [objects, objectId]);
+
   const selectedObject = objects.find((o) => o.id === objectId);
 
   const handleGeocode = async () => {
     setGeocodingLoading(true);
     setGeocodingStatus(null);
+    setModalError(null);
     try {
       const result = await searchAddressCoordinates(newObjAddress);
       setNewObjLat(result.lat.toFixed(5));
@@ -134,6 +143,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   };
 
   const handleSaveNewObject = async () => {
+    setModalError(null);
     if (!newObjName.trim() || !newObjAddress.trim()) {
       setGeocodingStatus({
         type: 'error',
@@ -141,20 +151,54 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       });
       return;
     }
-    const created = await onCreateObject({
-      name: newObjName.trim(),
-      address: newObjAddress.trim(),
-      lat: parseFloat(newObjLat) || 48.1351,
-      lng: parseFloat(newObjLng) || 11.582,
-      client_id: 'u4',
-      client_name: 'Isar-Grund Hausverwaltung GmbH',
-      units_count: 16,
-    });
-    setObjectId(created.id);
-    setShowNewObjectForm(false);
-    setNewObjName('');
-    setNewObjAddress('');
-    setGeocodingStatus(null);
+
+    let parsedLat = parseFloat(newObjLat.replace(',', '.'));
+    let parsedLng = parseFloat(newObjLng.replace(',', '.'));
+    if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) {
+      try {
+        setGeocodingLoading(true);
+        const geo = await searchAddressCoordinates(newObjAddress);
+        parsedLat = geo.lat;
+        parsedLng = geo.lng;
+        setNewObjLat(geo.lat.toFixed(5));
+        setNewObjLng(geo.lng.toFixed(5));
+      } catch (err) {
+        setGeocodingStatus({
+          type: 'error',
+          text: err instanceof Error ? err.message : t('createTask.coordsErrFail'),
+        });
+        return;
+      } finally {
+        setGeocodingLoading(false);
+      }
+    }
+
+    const clientUser = users.find((u) => u.role === 'client_hausverwaltung');
+    setSavingObject(true);
+    try {
+      const created = await onCreateObject({
+        name: newObjName.trim(),
+        address: newObjAddress.trim(),
+        lat: parsedLat,
+        lng: parsedLng,
+        client_id: clientUser?.id ?? '',
+        client_name: clientUser?.region || '',
+        units_count: 16,
+      });
+      setObjectId(created.id);
+      setShowNewObjectForm(false);
+      setNewObjName('');
+      setNewObjAddress('');
+      setNewObjLat('');
+      setNewObjLng('');
+      setGeocodingStatus(null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Objekt nije spremljen na server.';
+      setGeocodingStatus({ type: 'error', text: msg });
+      setModalError(msg);
+    } finally {
+      setSavingObject(false);
+    }
   };
 
   const handlePhotoAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -191,6 +235,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setModalError(null);
     if (!title.trim() || !objectId) return;
     if (category === 'Mülltonnendienst' && selectedBinTypes.length === 0) {
       setBinValidationError(true);
@@ -218,6 +263,10 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         bin_types: category === 'Mülltonnendienst' ? selectedBinTypes : undefined,
       });
       onClose();
+    } catch (err) {
+      setModalError(
+        err instanceof Error ? err.message : 'Spremanje zadatka na PocketBase nije uspjelo.'
+      );
     } finally {
       setSubmitting(false);
     }
@@ -455,10 +504,15 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   <button
                     type="button"
                     onClick={handleSaveNewObject}
-                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white cursor-pointer"
+                    disabled={savingObject || geocodingLoading}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-3 py-1.5 text-xs font-semibold text-white cursor-pointer"
                   >
-                    <MapPin className="w-3.5 h-3.5" />
-                    {t('createTask.saveSelectObj')}
+                    {savingObject ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <MapPin className="w-3.5 h-3.5" />
+                    )}
+                    {savingObject ? t('common.saving') : t('createTask.saveSelectObj')}
                   </button>
                 </div>
               </div>
@@ -589,6 +643,16 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               </div>
             )}
           </div>
+
+          {modalError && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-xl border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 px-3.5 py-2.5 text-xs font-semibold text-red-700 dark:text-red-300"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="break-words">{modalError}</span>
+            </div>
+          )}
 
           {/* Footer Submit */}
           <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-slate-200 dark:border-slate-800">

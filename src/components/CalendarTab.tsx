@@ -43,16 +43,13 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
   onCreateTaskForDate,
   onToggleBinOut,
 }) => {
-  const { t, tCategory, tBin, weekdays, locale } = useTranslation();
+  const { t, tCategory, tBin, weekdays, weekdaysLong, months, locale } = useTranslation();
   const todayStr = getTodayISODate();
   const [viewMode, setViewMode] = useState<'monat' | 'woche'>('monat');
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [cursorDate, setCursorDate] = useState<Date>(() => new Date());
 
-  const monthLabel = cursorDate.toLocaleDateString(locale, {
-    month: 'long',
-    year: 'numeric',
-  });
+  const monthLabel = `${months[cursorDate.getMonth()] ?? ''} ${cursorDate.getFullYear()}`;
 
   const currentWeekInfo = useMemo(() => getISOWeekAndYear(cursorDate), [cursorDate]);
 
@@ -102,6 +99,12 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
 
   const selectedDayTasks = tasksByDate.get(selectedDate) || [];
   const selectedDayBins = binsByDate.get(selectedDate) || [];
+  const selectedDayLabel = useMemo(() => {
+    const dObj = new Date(`${selectedDate}T12:00:00`);
+    if (Number.isNaN(dObj.getTime())) return selectedDate;
+    const wd = weekdaysLong[(dObj.getDay() + 6) % 7] ?? '';
+    return `${wd}, ${formatDateDE(selectedDate, locale)}`;
+  }, [selectedDate, weekdaysLong, locale]);
 
   return (
     <div className="space-y-4">
@@ -292,8 +295,8 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
               <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
                 {t('cal.selectedDay')}
               </p>
-              <h3 className="font-display text-base font-bold text-slate-900 dark:text-white font-mono tabular-nums">
-                {formatDateDE(selectedDate)}
+              <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                {selectedDayLabel}
               </h3>
             </div>
             <button

@@ -18,10 +18,12 @@ import {
   GARDEN_TASK_LABELS,
   HANDOVER_TYPE_LABELS,
   METER_TYPE_LABELS,
+  MONTH_NAMES,
   ROOM_LABELS,
   SUPPORTED_LANGUAGES,
   TranslationKey,
   UI_DICTIONARY,
+  WEEKDAYS_LONG,
   WEEKDAYS_SHORT,
   WINTER_ACTION_LABELS,
   translatePriorityLabel,
@@ -48,6 +50,8 @@ interface LanguageContextValue {
   tGardenTask: (task: string) => string;
   tRole: (role: UserRole, short?: boolean) => string;
   weekdays: string[];
+  weekdaysLong: string[];
+  months: string[];
 }
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
@@ -106,6 +110,8 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({
       tGardenTask: (task) => GARDEN_TASK_LABELS[task]?.[language] ?? task,
       tRole: (role, short) => translateRoleLabel(role, language, short),
       weekdays: WEEKDAYS_SHORT[language] ?? WEEKDAYS_SHORT.DE,
+      weekdaysLong: WEEKDAYS_LONG[language] ?? WEEKDAYS_LONG.DE,
+      months: MONTH_NAMES[language] ?? MONTH_NAMES.DE,
     }),
     [language, locale, docLanguage, onChangeLanguage, onChangeDocLanguage, t]
   );

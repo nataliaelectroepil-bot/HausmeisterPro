@@ -10,33 +10,33 @@ export function getTodayISODate(): string {
   return `${y}-${m}-${d}`;
 }
 
-export function formatDateDE(dateStr: string): string {
+export function formatDateDE(dateStr: string, locale = 'de-DE'): string {
   if (!dateStr) return '—';
   const d = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`);
   if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString('de-DE', {
+  return d.toLocaleDateString(locale, {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
   });
 }
 
-export function formatShortDateDE(dateStr: string): string {
+export function formatShortDateDE(dateStr: string, locale = 'de-DE'): string {
   if (!dateStr) return '—';
   const d = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`);
   if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString('de-DE', {
+  return d.toLocaleDateString(locale, {
     weekday: 'short',
     day: '2-digit',
     month: '2-digit',
   });
 }
 
-export function formatDateTimeDE(dateStr: string): string {
+export function formatDateTimeDE(dateStr: string, locale = 'de-DE'): string {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleString('de-DE', {
+  return d.toLocaleString(locale, {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -45,11 +45,11 @@ export function formatDateTimeDE(dateStr: string): string {
   });
 }
 
-export function formatTimeDE(dateStr?: string): string {
+export function formatTimeDE(dateStr?: string, locale = 'de-DE'): string {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleTimeString('de-DE', {
+  return d.toLocaleTimeString(locale, {
     hour: '2-digit',
     minute: '2-digit',
   });

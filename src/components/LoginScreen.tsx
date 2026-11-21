@@ -106,7 +106,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
     const res = await pocketbaseService.loginWithCredentials(email, password);
     setSubmitting(false);
     if (!res.ok) {
-      setErrorMsg(t('login.errInvalid'));
+      setErrorMsg(
+        res.error && res.error !== 'INVALID_CREDENTIALS'
+          ? res.error
+          : t('login.errInvalid')
+      );
       return;
     }
     onSelectUser(res.user);
@@ -148,52 +152,54 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-2">
-              {t('login.selectUser')}
-            </label>
-            <div className="space-y-2">
-              {users.map((user) => {
-                const active = selectedId === user.id;
-                const RoleIcon =
-                  user.role === 'admin'
-                    ? ShieldCheck
-                    : user.role === 'client_hausverwaltung'
-                      ? Building2
-                      : Wrench;
-                const roleLabel = tRole(user.role, false);
-                return (
-                  <button
-                    key={user.id}
-                    type="button"
-                    onClick={() => handleSelectProfile(user)}
-                    className={`w-full flex items-center justify-between gap-3 rounded-xl border p-3.5 text-left transition-all cursor-pointer ${
-                      active
-                        ? 'border-orange-500 bg-orange-500/10'
-                        : 'border-slate-800 bg-slate-950/50 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <RoleIcon
-                        className={`w-5 h-5 shrink-0 ${
-                          active ? 'text-orange-400' : 'text-slate-400'
-                        }`}
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white truncate">
-                          {user.role === 'admin' ? user.email : user.name}
-                        </p>
-                        <p className="text-xs text-slate-400 truncate">
-                          {user.employee_id} · {roleLabel}
-                        </p>
+          {users.length > 0 && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-2">
+                {t('login.selectUser')}
+              </label>
+              <div className="space-y-2">
+                {users.map((user) => {
+                  const active = selectedId === user.id;
+                  const RoleIcon =
+                    user.role === 'admin'
+                      ? ShieldCheck
+                      : user.role === 'client_hausverwaltung'
+                        ? Building2
+                        : Wrench;
+                  const roleLabel = tRole(user.role, false);
+                  return (
+                    <button
+                      key={user.id}
+                      type="button"
+                      onClick={() => handleSelectProfile(user)}
+                      className={`w-full flex items-center justify-between gap-3 rounded-xl border p-3.5 text-left transition-all cursor-pointer ${
+                        active
+                          ? 'border-orange-500 bg-orange-500/10'
+                          : 'border-slate-800 bg-slate-950/50 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <RoleIcon
+                          className={`w-5 h-5 shrink-0 ${
+                            active ? 'text-orange-400' : 'text-slate-400'
+                          }`}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-white truncate">
+                            {user.role === 'admin' ? user.email : user.name}
+                          </p>
+                          <p className="text-xs text-slate-400 truncate">
+                            {user.employee_id} · {roleLabel}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                    {active && <UserCheck className="w-4 h-4 text-orange-400 shrink-0" />}
-                  </button>
-                );
-              })}
+                      {active && <UserCheck className="w-4 h-4 text-orange-400 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {!checkingStatus && (isAdminSelected || pocketbaseEnabled) && (
             <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
