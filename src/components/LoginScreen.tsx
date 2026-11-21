@@ -24,11 +24,9 @@ interface LoginScreenProps {
 export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser }) => {
   const { language, setLanguage, t, tRole } = useTranslation();
   const [selectedId, setSelectedId] = useState<string>(users[0]?.id ?? 'u1');
-  const [email, setEmail] = useState<string>(
-    users[0]?.email ?? 'sandokanmcroar@gmail.com'
-  );
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [adminConfigured, setAdminConfigured] = useState<boolean>(true);
   const [checkingStatus, setCheckingStatus] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -53,7 +51,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
 
   const handleSelectProfile = (user: User) => {
     setSelectedId(user.id);
-    setEmail(user.email);
+    setEmail('');
     setPassword('');
     setConfirmPassword('');
     setErrorMsg('');
@@ -229,9 +227,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onSelectUser })
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    readOnly={showSetupAdminForm}
+                    placeholder="name@firma.de"
+                    autoComplete="email"
                     required
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3.5 py-2.5 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-orange-500 focus:outline-none"
                   />
                 </div>
               </div>
