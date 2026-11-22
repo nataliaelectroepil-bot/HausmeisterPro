@@ -1,81 +1,80 @@
 import React, { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Camera,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
+  Clock,
   MapPin,
   Plus,
   Repeat,
+  RotateCcw,
   Trash2,
+  User as UserIcon,
   X,
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
-import { BinSchedule, BinType, PropertyObject } from '../types/facility';
+import { BinSchedule, BinType, FacilityTask, PropertyObject, User } from '../types/facility';
 import {
   formatDateDE,
+  formatDateTimeDE,
   formatShortDateDE,
   formatTimeDE,
   getISOWeekAndYear,
   getTodayISODate,
   getWeekStartEnd,
+  isTaskOverdue,
 } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
+import { BIN_VISUAL_META, getTaskEffectiveBinTypes } from '../utils/binMeta';
 
 interface BinsTabProps {
   schedules: BinSchedule[];
+  tasks: FacilityTask[];
   objects: PropertyObject[];
+  users: User[];
   onUpdateSchedule: (id: string, patch: Partial<BinSchedule>) => Promise<void>;
   onCreateSchedules: (items: Array<Omit<BinSchedule, 'id'>>) => Promise<void>;
+  onOpenTaskDetail: (task: FacilityTask) => void;
+  onQuickCompleteWithPhoto: (
+    task: FacilityTask,
+    photo: Awaited<ReturnType<typeof createWatermarkedPhoto>>
+  ) => Promise<void>;
+  onUpdateTask: (taskId: string, patch: Partial<FacilityTask>) => Promise<void>;
 }
-
-const BIN_META: Record<
-  BinType,
-  { label: string; dotClass: string; badgeBg: string; borderClass: string }
-> = {
-  Restmüll: {
-    label: 'Restmüll',
-    dotClass: 'bg-black ring-1 ring-neutral-500/50',
-    badgeBg: 'bg-black text-white border border-neutral-700',
-    borderClass: 'border-neutral-800 dark:border-neutral-700',
-  },
-  Papier: {
-    label: 'Papier',
-    dotClass: 'bg-blue-600',
-    badgeBg: 'bg-blue-600 text-white',
-    borderClass: 'border-blue-300 dark:border-blue-800',
-  },
-  'Gelbe Tonne': {
-    label: 'Gelbe Tonne',
-    dotClass: 'bg-yellow-400',
-    badgeBg: 'bg-yellow-400 text-slate-950',
-    borderClass: 'border-yellow-300 dark:border-yellow-700',
-  },
-  Bio: {
-    label: 'Bio',
-    dotClass: 'bg-amber-900 dark:bg-amber-800',
-    badgeBg: 'bg-amber-900 text-white dark:bg-amber-800',
-    borderClass: 'border-amber-800/40 dark:border-amber-700',
-  },
-};
 
 const BIN_TYPES: BinType[] = ['Restmüll', 'Papier', 'Gelbe Tonne', 'Bio'];
 
+function isBinTask(task: FacilityTask): boolean {
+  return (
+    task.category === 'Mülltonnendienst' ||
+    (Array.isArray(task.bin_types) && task.bin_types.length > 0)
+  );
+}
+
 export const BinsTab: React.FC<BinsTabProps> = ({
   schedules,
+  tasks,
   objects,
+  users,
   onUpdateSchedule,
   onCreateSchedules,
+  onOpenTaskDetail,
+  onQuickCompleteWithPhoto,
+  onUpdateTask,
 }) => {
-  const { t, tBin, locale } = useTranslation();
+  const { t, tBin, tCategory, tPriority, tStatus, locale } = useTranslation();
   const initialKW = useMemo(() => getISOWeekAndYear(new Date()), []);
   const [selectedKW, setSelectedKW] = useState<{ kw: number; year: number }>(initialKW);
   const [selectedBinFilter, setSelectedBinFilter] = useState<'Alle' | BinType>('Alle');
   const [photoModalBin, setPhotoModalBin] = useState<BinSchedule | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const [uploadingPhotoId, setUploadingPhotoId] = useState<string | null>(null);
+  const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null);
 
   // New Pickup Modal State
   const [newObjId, setNewObjId] = useState<string>(objects[0]?.id ?? '');
@@ -100,7 +99,44 @@ export const BinsTab: React.FC<BinsTabProps> = ({
     return weekSchedules.filter((s) => s.bin_type === selectedBinFilter);
   }, [weekSchedules, selectedBinFilter]);
 
-  const completedCount = weekSchedules.filter((s) => s.status_out && s.status_in).length;
+  const allBinTasks = useMemo(() => tasks.filter(isBinTask), [tasks]);
+
+  const weekBinTasks = useMemo(() => {
+    return allBinTasks.filter((task) => {
+      if (!task.due_date) return false;
+      const { kw, year } = getISOWeekAndYear(task.due_date);
+      return kw === selectedKW.kw && year === selectedKW.year;
+    });
+  }, [allBinTasks, selectedKW]);
+
+  // Show all non-completed Mülltonnendienst tasks regardless of KW plus completed tasks in the selected KW
+  const relevantBinTasks = useMemo(() => {
+    return allBinTasks
+      .filter((task) => {
+        if (task.status !== 'erledigt') return true;
+        if (!task.due_date) return false;
+        const { kw, year } = getISOWeekAndYear(task.due_date);
+        return kw === selectedKW.kw && year === selectedKW.year;
+      })
+      .sort((a, b) => {
+        const aDone = a.status === 'erledigt' ? 1 : 0;
+        const bDone = b.status === 'erledigt' ? 1 : 0;
+        if (aDone !== bDone) return aDone - bDone;
+        return a.due_date.localeCompare(b.due_date);
+      });
+  }, [allBinTasks, selectedKW]);
+
+  const filteredBinTasks = useMemo(() => {
+    if (selectedBinFilter === 'Alle') return relevantBinTasks;
+    return relevantBinTasks.filter((task) =>
+      getTaskEffectiveBinTypes(task).includes(selectedBinFilter)
+    );
+  }, [relevantBinTasks, selectedBinFilter]);
+
+  const totalWeekItems = weekSchedules.length + weekBinTasks.length;
+  const completedCount =
+    weekSchedules.filter((s) => s.status_out && s.status_in).length +
+    weekBinTasks.filter((task) => task.status === 'erledigt').length;
 
   const shiftKW = (delta: number) => {
     setSelectedKW((prev) => {
@@ -152,6 +188,29 @@ export const BinsTab: React.FC<BinsTabProps> = ({
       setPhotoModalBin({ ...bin, photo });
     } finally {
       setUploadingPhotoId(null);
+      e.target.value = '';
+    }
+  };
+
+  const handleTaskQuickPhoto = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    task: FacilityTask,
+    obj?: PropertyObject
+  ) => {
+    e.stopPropagation();
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingTaskId(task.id);
+    try {
+      const photo = await createWatermarkedPhoto(file, {
+        objectName: obj?.name ?? t('common.object'),
+        fallbackLat: obj?.lat,
+        fallbackLng: obj?.lng,
+        caption: task.title,
+      });
+      await onQuickCompleteWithPhoto(task, photo);
+    } finally {
+      setUploadingTaskId(null);
       e.target.value = '';
     }
   };
@@ -256,7 +315,7 @@ export const BinsTab: React.FC<BinsTabProps> = ({
           <div className="text-right">
             <p className="text-xs text-slate-500 dark:text-slate-400">{t('bins.weekProgress')}</p>
             <p className="font-mono text-base font-bold text-slate-900 dark:text-white tabular-nums">
-              {t('bins.weekProgressVal', { done: completedCount, total: weekSchedules.length })}
+              {t('bins.weekProgressVal', { done: completedCount, total: totalWeekItems })}
             </p>
           </div>
           <div className="w-24 h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
@@ -264,8 +323,8 @@ export const BinsTab: React.FC<BinsTabProps> = ({
               className="h-full bg-emerald-500 transition-all"
               style={{
                 width:
-                  weekSchedules.length > 0
-                    ? `${Math.round((completedCount / weekSchedules.length) * 100)}%`
+                  totalWeekItems > 0
+                    ? `${Math.round((completedCount / totalWeekItems) * 100)}%`
                     : '0%',
               }}
             />
@@ -274,28 +333,40 @@ export const BinsTab: React.FC<BinsTabProps> = ({
       </div>
 
       {/* Bin Type Visual Filter Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
         <button
           type="button"
           onClick={() => setSelectedBinFilter('Alle')}
           className={`rounded-xl border p-3 text-left transition-all cursor-pointer ${
             selectedBinFilter === 'Alle'
-              ? 'border-orange-500 bg-slate-900 text-white dark:bg-orange-500'
+              ? 'border-slate-900 bg-slate-900 text-white dark:border-orange-500 dark:bg-orange-500'
               : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800'
           }`}
         >
           <div className="flex items-center justify-between">
             <Trash2 className="w-4 h-4 opacity-80" />
-            <span className="font-mono text-xs font-bold tabular-nums">
-              {weekSchedules.length}
+            <span
+              className={`font-mono text-xs font-bold tabular-nums ${
+                selectedBinFilter === 'Alle' ? 'text-white' : ''
+              }`}
+            >
+              {weekSchedules.length + relevantBinTasks.length}
             </span>
           </div>
-          <p className="mt-2 text-xs font-semibold">{t('bins.allFractions')}</p>
+          <p
+            className={`mt-2 text-xs font-semibold leading-snug ${
+              selectedBinFilter === 'Alle' ? 'text-white' : 'text-slate-900 dark:text-white'
+            }`}
+          >
+            {t('bins.allFractions')}
+          </p>
         </button>
 
         {BIN_TYPES.map((type) => {
-          const meta = BIN_META[type];
-          const count = weekSchedules.filter((s) => s.bin_type === type).length;
+          const meta = BIN_VISUAL_META[type];
+          const count =
+            weekSchedules.filter((s) => s.bin_type === type).length +
+            relevantBinTasks.filter((task) => getTaskEffectiveBinTypes(task).includes(type)).length;
           const active = selectedBinFilter === type;
 
           return (
@@ -323,8 +394,8 @@ export const BinsTab: React.FC<BinsTabProps> = ({
         })}
       </div>
 
-      {/* Bin Action Cards */}
-      {filteredSchedules.length === 0 ? (
+      {/* Empty state only when BOTH schedules and Mülltonnendienst tasks are empty */}
+      {filteredSchedules.length === 0 && filteredBinTasks.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-10 text-center">
           <Trash2 className="w-8 h-8 text-slate-400 mx-auto mb-2" />
           <p className="font-display text-base font-semibold text-slate-900 dark:text-white">
@@ -335,125 +406,317 @@ export const BinsTab: React.FC<BinsTabProps> = ({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {filteredSchedules.map((bin) => {
-            const obj = objects.find((o) => o.id === bin.object_id);
-            const meta = BIN_META[bin.bin_type];
-            const bothDone = bin.status_out && bin.status_in;
-            const oclockSuffix = t('common.oclock') ? ` ${t('common.oclock')}` : '';
+        <div className="space-y-6">
+          {/* Mülltonnendienst Tasks Section */}
+          {filteredBinTasks.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>{t('bins.tasksSectionTitle')}</span>
+                  <span className="font-mono text-xs font-bold rounded-md bg-orange-100 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 px-2 py-0.5 tabular-nums">
+                    {filteredBinTasks.length}
+                  </span>
+                </h2>
+              </div>
 
-            return (
-              <div
-                key={bin.id}
-                className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                      <span
-                        className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-bold ${meta.badgeBg}`}
-                      >
-                        {tBin(bin.bin_type)}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
-                        {formatShortDateDE(bin.pickup_date, locale)}
-                      </span>
-                      {bin.recurring_group_id && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="inline-flex items-center gap-1 text-slate-500">
-                            <Repeat className="w-3 h-3" /> {t('bins.weekly')}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {filteredBinTasks.map((task) => {
+                  const obj = objects.find((o) => o.id === task.object_id);
+                  const worker = users.find((u) => u.id === task.assigned_to);
+                  const overdue = isTaskOverdue(task.due_date, task.status);
+                  const checkedCount = task.checklist_json.filter((c) => c.checked).length;
+
+                  return (
+                    <div
+                      key={task.id}
+                      onClick={() => onOpenTaskDetail(task)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onOpenTaskDetail(task);
+                        }
+                      }}
+                      className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 hover:border-orange-400 dark:hover:border-orange-500 transition-colors cursor-pointer flex flex-col justify-between gap-4"
+                    >
+                      <div>
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                            <span className="font-semibold text-orange-600 dark:text-orange-400">
+                              {tCategory(task.category)}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-mono tabular-nums flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" />
+                              {formatDateTimeDE(task.due_date, locale)}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            {overdue ? (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-0.5 text-[11px] font-bold text-white">
+                                <AlertTriangle className="w-3 h-3" />
+                                {t('common.overdue')}
+                              </span>
+                            ) : task.priority === 'dringend' && task.status !== 'erledigt' ? (
+                              <span className="text-xs font-bold text-red-600 dark:text-red-400">
+                                {tPriority('dringend')}
+                              </span>
+                            ) : null}
+
+                            <span
+                              className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                                task.status === 'erledigt'
+                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                  : task.status === 'in_bearbeitung'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                  : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                              }`}
+                            >
+                              {tStatus(task.status)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <h3 className="mt-2 font-display text-base font-bold text-slate-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors leading-snug">
+                          {task.title}
+                        </h3>
+
+                        <p className="mt-1.5 text-xs text-slate-600 dark:text-slate-300 flex items-start gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                          <span>
+                            <strong className="font-semibold text-slate-800 dark:text-slate-100">
+                              {obj?.name ?? t('common.object')}
+                            </strong>{' '}
+                            · {obj?.address ?? '—'}
                           </span>
-                        </>
+                        </p>
+
+                        {(() => {
+                          const effectiveBins = getTaskEffectiveBinTypes(task);
+                          if (effectiveBins.length === 0) return null;
+                          return (
+                            <div className="mt-2.5 flex flex-wrap gap-1.5">
+                              {effectiveBins.map((binType) => {
+                                const meta = BIN_VISUAL_META[binType];
+                                return (
+                                  <span
+                                    key={binType}
+                                    className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold ${meta.badgeClass}`}
+                                  >
+                                    <span
+                                      className={`h-2 w-2 rounded-full ${meta.dotClass} ring-1 ring-white/50`}
+                                    />
+                                    <span>{tBin(binType)}</span>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      <div
+                        className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center gap-2.5 text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                          <span className="flex items-center gap-1">
+                            <ClipboardCheck className="w-3.5 h-3.5 text-slate-400" />
+                            {checkedCount}/{task.checklist_json.length}
+                          </span>
+                          {worker && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-sans flex items-center gap-1">
+                                <UserIcon className="w-3 h-3 text-slate-400" />
+                                {worker.name}
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {task.status !== 'erledigt' ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void onUpdateTask(task.id, {
+                                    status: 'erledigt',
+                                    completed_at: new Date().toISOString(),
+                                  })
+                                }
+                                className="flex items-center gap-1.5 rounded-xl border border-emerald-600/40 bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 cursor-pointer transition-colors min-h-[38px]"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>{t('bins.markDone')}</span>
+                              </button>
+
+                              <label className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 text-xs font-semibold text-white cursor-pointer transition-colors min-h-[38px]">
+                                <Camera className="w-3.5 h-3.5" />
+                                <span>
+                                  {uploadingTaskId === task.id
+                                    ? t('tasks.savingPhoto')
+                                    : t('common.photoCompleteBtn')}
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  capture="environment"
+                                  className="hidden"
+                                  onChange={(e) => handleTaskQuickPhoto(e, task, obj)}
+                                />
+                              </label>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void onUpdateTask(task.id, {
+                                  status: 'offen',
+                                  completed_at: undefined,
+                                })
+                              }
+                              className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>{t('bins.reopenTask')}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Bin Schedule Action Cards */}
+          {filteredSchedules.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {filteredSchedules.map((bin) => {
+                const obj = objects.find((o) => o.id === bin.object_id);
+                const meta = BIN_VISUAL_META[bin.bin_type];
+                const bothDone = bin.status_out && bin.status_in;
+                const oclockSuffix = t('common.oclock') ? ` ${t('common.oclock')}` : '';
+
+                return (
+                  <div
+                    key={bin.id}
+                    className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-bold ${meta.badgeClass}`}
+                          >
+                            {tBin(bin.bin_type)}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
+                            {formatShortDateDE(bin.pickup_date, locale)}
+                          </span>
+                          {bin.recurring_group_id && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="inline-flex items-center gap-1 text-slate-500">
+                                <Repeat className="w-3 h-3" /> {t('bins.weekly')}
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        <h3 className="mt-2 font-display text-base font-bold text-slate-900 dark:text-white truncate">
+                          {obj?.name ?? t('common.object')}
+                        </h3>
+                        <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">{obj?.address ?? '—'}</span>
+                        </p>
+                      </div>
+
+                      {bothDone && (
+                        <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                          <CheckCircle2 className="w-4 h-4" />
+                          {t('common.done')}
+                        </span>
                       )}
                     </div>
 
-                    <h3 className="mt-2 font-display text-base font-bold text-slate-900 dark:text-white truncate">
-                      {obj?.name ?? t('common.object')}
-                    </h3>
-                    <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="truncate">{obj?.address ?? '—'}</span>
-                    </p>
+                    {/* Tactile Out / In Buttons */}
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleOut(bin)}
+                        className={`flex flex-col items-center justify-center rounded-xl border px-3 py-2.5 min-h-[54px] transition-all cursor-pointer ${
+                          bin.status_out
+                            ? 'border-emerald-600 bg-emerald-600 text-white'
+                            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 text-xs sm:text-sm font-bold">
+                          <ArrowUp className="w-4 h-4" />
+                          {t('bins.out')}
+                        </span>
+                        <span
+                          className={`mt-0.5 font-mono text-[11px] tabular-nums ${
+                            bin.status_out ? 'text-emerald-100' : 'text-slate-400'
+                          }`}
+                        >
+                          {bin.status_out && bin.time_out
+                            ? `${formatTimeDE(bin.time_out)}${oclockSuffix}`
+                            : t('bins.tapConfirm')}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleToggleIn(bin)}
+                        className={`flex flex-col items-center justify-center rounded-xl border px-3 py-2.5 min-h-[54px] transition-all cursor-pointer ${
+                          bin.status_in
+                            ? 'border-emerald-600 bg-emerald-600 text-white'
+                            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 text-xs sm:text-sm font-bold">
+                          <ArrowDown className="w-4 h-4" />
+                          {t('bins.in')}
+                        </span>
+                        <span
+                          className={`mt-0.5 font-mono text-[11px] tabular-nums ${
+                            bin.status_in ? 'text-emerald-100' : 'text-slate-400'
+                          }`}
+                        >
+                          {bin.status_in && bin.time_in
+                            ? `${formatTimeDE(bin.time_in)}${oclockSuffix}`
+                            : t('bins.tapConfirm')}
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* Photo Action Row */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {bin.photo ? t('bins.photoPresent') : t('bins.photoMissing')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPhotoModalBin(bin)}
+                        className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                      >
+                        <Camera className="w-3.5 h-3.5 text-orange-500" />
+                        <span>{t('bins.photoViewSend')}</span>
+                      </button>
+                    </div>
                   </div>
-
-                  {bothDone && (
-                    <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
-                      <CheckCircle2 className="w-4 h-4" />
-                      {t('common.done')}
-                    </span>
-                  )}
-                </div>
-
-                {/* Tactile Out / In Buttons */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleOut(bin)}
-                    className={`flex flex-col items-center justify-center rounded-xl border px-3 py-2.5 min-h-[54px] transition-all cursor-pointer ${
-                      bin.status_out
-                        ? 'border-emerald-600 bg-emerald-600 text-white'
-                        : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <span className="flex items-center gap-1.5 text-xs sm:text-sm font-bold">
-                      <ArrowUp className="w-4 h-4" />
-                      {t('bins.out')}
-                    </span>
-                    <span
-                      className={`mt-0.5 font-mono text-[11px] tabular-nums ${
-                        bin.status_out ? 'text-emerald-100' : 'text-slate-400'
-                      }`}
-                    >
-                      {bin.status_out && bin.time_out
-                        ? `${formatTimeDE(bin.time_out)}${oclockSuffix}`
-                        : t('bins.tapConfirm')}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleToggleIn(bin)}
-                    className={`flex flex-col items-center justify-center rounded-xl border px-3 py-2.5 min-h-[54px] transition-all cursor-pointer ${
-                      bin.status_in
-                        ? 'border-emerald-600 bg-emerald-600 text-white'
-                        : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <span className="flex items-center gap-1.5 text-xs sm:text-sm font-bold">
-                      <ArrowDown className="w-4 h-4" />
-                      {t('bins.in')}
-                    </span>
-                    <span
-                      className={`mt-0.5 font-mono text-[11px] tabular-nums ${
-                        bin.status_in ? 'text-emerald-100' : 'text-slate-400'
-                      }`}
-                    >
-                      {bin.status_in && bin.time_in
-                        ? `${formatTimeDE(bin.time_in)}${oclockSuffix}`
-                        : t('bins.tapConfirm')}
-                    </span>
-                  </button>
-                </div>
-
-                {/* Photo Action Row */}
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
-                    {bin.photo ? t('bins.photoPresent') : t('bins.photoMissing')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPhotoModalBin(bin)}
-                    className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                  >
-                    <Camera className="w-3.5 h-3.5 text-orange-500" />
-                    <span>{t('bins.photoViewSend')}</span>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -557,7 +820,7 @@ export const BinsTab: React.FC<BinsTabProps> = ({
                           : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
                       }`}
                     >
-                      <span className={`h-3 w-3 rounded-sm ${BIN_META[typeKey].dotClass}`} />
+                      <span className={`h-3 w-3 rounded-sm ${BIN_VISUAL_META[typeKey].dotClass}`} />
                       {tBin(typeKey)}
                     </button>
                   ))}

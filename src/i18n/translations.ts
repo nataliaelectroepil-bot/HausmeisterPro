@@ -285,6 +285,9 @@ const DE = {
   'bins.duration': 'Zeitraum:',
   'bins.weeksCount': '{n} Wochen',
   'bins.savePickup': 'Abholung speichern',
+  'bins.tasksSectionTitle': 'Mülltonnendienst-Aufgaben',
+  'bins.markDone': 'Als erledigt markieren',
+  'bins.reopenTask': 'Wieder öffnen',
 
   // Calendar Tab
   'cal.title': 'Einsatzkalender',
@@ -734,6 +737,9 @@ const EN: Record<TranslationKey, string> = {
   'bins.duration': 'Duration:',
   'bins.weeksCount': '{n} weeks',
   'bins.savePickup': 'Save Pickup',
+  'bins.tasksSectionTitle': 'Waste Bin Service Tasks',
+  'bins.markDone': 'Mark as done',
+  'bins.reopenTask': 'Reopen',
 
   'cal.title': 'Operations Calendar',
   'cal.subtitle': 'Tasks & waste pickups in monthly and weekly view',
@@ -1172,6 +1178,9 @@ const HR: Record<TranslationKey, string> = {
   'bins.duration': 'Trajanje:',
   'bins.weeksCount': '{n} tjedana',
   'bins.savePickup': 'Spremi termin',
+  'bins.tasksSectionTitle': 'Zadaci za kante (Mülltonnendienst)',
+  'bins.markDone': 'Označi kao obavljeno',
+  'bins.reopenTask': 'Ponovno otvori',
 
   'cal.title': 'Kalendar rada',
   'cal.subtitle': 'Pregled zadataka i odvoza otpada po mjesecu i tjednu',
@@ -1610,6 +1619,9 @@ const SQ: Record<TranslationKey, string> = {
   'bins.duration': 'Kohëzgjatja:',
   'bins.weeksCount': '{n} javë',
   'bins.savePickup': 'Ruaj terminin',
+  'bins.tasksSectionTitle': 'Detyrat e shërbimit të koshave',
+  'bins.markDone': 'Shëno si të përfunduar',
+  'bins.reopenTask': 'Rihap',
 
   'cal.title': 'Kalendari i punës',
   'cal.subtitle': 'Detyrat dhe mbledhja e mbeturinave në pamje mujore dhe javore',
@@ -2048,6 +2060,9 @@ const PL: Record<TranslationKey, string> = {
   'bins.duration': 'Okres:',
   'bins.weeksCount': '{n} tygodni',
   'bins.savePickup': 'Zapisz odbiór',
+  'bins.tasksSectionTitle': 'Zadania wywozu pojemników',
+  'bins.markDone': 'Oznacz jako wykonane',
+  'bins.reopenTask': 'Otwórz ponownie',
 
   'cal.title': 'Kalendarz pracy',
   'cal.subtitle': 'Zadania i wywóz śmieci w widoku miesięcznym i tygodniowym',
@@ -2486,6 +2501,9 @@ const TR: Record<TranslationKey, string> = {
   'bins.duration': 'Süre:',
   'bins.weeksCount': '{n} hafta',
   'bins.savePickup': 'Planı Kaydet',
+  'bins.tasksSectionTitle': 'Konteyner Hizmet Görevleri',
+  'bins.markDone': 'Tamamlandı olarak işaretle',
+  'bins.reopenTask': 'Yeniden aç',
 
   'cal.title': 'İş Takvimi',
   'cal.subtitle': 'Aylık ve haftalık görünümde görevler ve çöp günleri',
@@ -2924,6 +2942,9 @@ const RU: Record<TranslationKey, string> = {
   'bins.duration': 'Период:',
   'bins.weeksCount': '{n} нед.',
   'bins.savePickup': 'Сохранить вывоз',
+  'bins.tasksSectionTitle': 'Задачи по обслуживанию баков',
+  'bins.markDone': 'Отметить выполненным',
+  'bins.reopenTask': 'Открыть снова',
 
   'cal.title': 'Рабочий календарь',
   'cal.subtitle': 'Задачи и графики вывоза мусора по месяцам и неделям',

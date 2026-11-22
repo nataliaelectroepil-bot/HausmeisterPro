@@ -14,6 +14,7 @@ import {
   WinterLog,
 } from '../types/facility';
 import { getISOWeekAndYear, getWeekStartEnd } from '../utils/dateUtils';
+import { normalizeBinTypes } from '../utils/binMeta';
 
 const STORAGE_KEYS = {
   users: 'hmpro_pb_users_v1',
@@ -217,7 +218,7 @@ function normalizeTaskRecord(task: FacilityTask): FacilityTask {
     ...task,
     checklist_json: Array.isArray(task.checklist_json) ? task.checklist_json : [],
     photos: Array.isArray(task.photos) ? task.photos : [],
-    bin_types: Array.isArray(task.bin_types) && task.bin_types.length > 0 ? task.bin_types : undefined,
+    bin_types: normalizeBinTypes(task.bin_types),
     notes: typeof task.notes === 'string' ? task.notes : '',
     description: typeof task.description === 'string' ? task.description : '',
   };
@@ -1463,7 +1464,7 @@ export const pocketbaseService = {
       return (remote?.items ?? []).map(normalizeTaskRecord);
     }
     const seed = buildSeedData();
-    return readStorage<FacilityTask[]>(STORAGE_KEYS.tasks, seed.tasks);
+    return readStorage<FacilityTask[]>(STORAGE_KEYS.tasks, seed.tasks).map(normalizeTaskRecord);
   },
 
   async createTask(input: Omit<FacilityTask, 'id' | 'created_at'>): Promise<FacilityTask> {

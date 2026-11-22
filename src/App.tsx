@@ -492,9 +492,14 @@ export default function App() {
             {activeTab === 'muelltonnen' && (
               <BinsTab
                 schedules={binSchedules}
+                tasks={tasks}
                 objects={objects}
+                users={users}
                 onUpdateSchedule={handleUpdateBinSchedule}
                 onCreateSchedules={handleCreateBinSchedules}
+                onOpenTaskDetail={(task) => setSelectedTaskId(task.id)}
+                onQuickCompleteWithPhoto={handleQuickCompleteWithPhoto}
+                onUpdateTask={handleUpdateTask}
               />
             )}
 
