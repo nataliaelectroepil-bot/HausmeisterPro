@@ -5,6 +5,7 @@ import {
   Check,
   CheckCircle2,
   Loader2,
+  LocateFixed,
   MapPin,
   Plus,
   Search,
@@ -24,7 +25,7 @@ import {
 } from '../types/facility';
 import { BIN_TYPE_ORDER, BIN_VISUAL_META } from '../utils/binMeta';
 import { getTodayISODate } from '../utils/dateUtils';
-import { searchAddressCoordinates } from '../utils/geocoding';
+import { reverseGeocodeCoordinates, searchAddressCoordinates } from '../utils/geocoding';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 
 interface CreateTaskModalProps {
@@ -105,6 +106,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [manualLat, setManualLat] = useState('');
   const [manualLng, setManualLng] = useState('');
   const [manualGeocodedFor, setManualGeocodedFor] = useState('');
+  const [manualCoordsSource, setManualCoordsSource] = useState<'geocode' | 'gps' | null>(null);
 
   // New Object inline creation + Nominatim geocoding
   const [newObjName, setNewObjName] = useState('');
@@ -112,7 +114,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [newObjLat, setNewObjLat] = useState<string>('');
   const [newObjLng, setNewObjLng] = useState<string>('');
   const [newObjGeocodedFor, setNewObjGeocodedFor] = useState('');
+  const [newObjCoordsSource, setNewObjCoordsSource] = useState<'geocode' | 'gps' | null>(null);
   const [geocodingLoading, setGeocodingLoading] = useState(false);
+  const [gpsLocating, setGpsLocating] = useState(false);
   const [geocodingStatus, setGeocodingStatus] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -146,10 +150,12 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         setManualLat(result.lat.toFixed(5));
         setManualLng(result.lng.toFixed(5));
         setManualGeocodedFor(addr.toLowerCase());
+        setManualCoordsSource('geocode');
       } else {
         setNewObjLat(result.lat.toFixed(5));
         setNewObjLng(result.lng.toFixed(5));
         setNewObjGeocodedFor(addr.toLowerCase());
+        setNewObjCoordsSource('geocode');
       }
       setGeocodingStatus({
         type: 'success',
@@ -168,15 +174,99 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   };
 
+  const handleUseCurrentLocation = async (target: 'manual' | 'newObject') => {
+    setModalError(null);
+    setGeocodingStatus(null);
+
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeocodingStatus({
+        type: 'error',
+        text: t('createTask.gpsErrUnsupported'),
+      });
+      return;
+    }
+
+    setGpsLocating(true);
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        });
+      });
+
+      const lat = Number(pos.coords.latitude.toFixed(6));
+      const lng = Number(pos.coords.longitude.toFixed(6));
+      const latStr = lat.toFixed(6);
+      const lngStr = lng.toFixed(6);
+
+      // Immediately store coordinates in task/object state and switch out of 'existing' mode if needed
+      if (addressMode === 'existing') {
+        setAddressMode(target);
+      }
+
+      if (target === 'manual') {
+        setManualLat(latStr);
+        setManualLng(lngStr);
+        setManualCoordsSource('gps');
+      } else {
+        setNewObjLat(latStr);
+        setNewObjLng(lngStr);
+        setNewObjCoordsSource('gps');
+      }
+
+      let resolvedAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      try {
+        resolvedAddress = await reverseGeocodeCoordinates(lat, lng);
+      } catch {
+        // Keep coordinate fallback string if Nominatim reverse geocoding is temporarily unavailable
+      }
+
+      if (target === 'manual') {
+        setManualAddress(resolvedAddress);
+        setManualGeocodedFor(resolvedAddress.trim().toLowerCase());
+      } else {
+        setNewObjAddress(resolvedAddress);
+        setNewObjGeocodedFor(resolvedAddress.trim().toLowerCase());
+      }
+
+      setGeocodingStatus({
+        type: 'success',
+        text: t('createTask.gpsSavedStatus', {
+          lat: lat.toFixed(5),
+          lng: lng.toFixed(5),
+        }),
+      });
+    } catch (err) {
+      const geoErr = err as GeolocationPositionError | undefined;
+      let errMsg = t('createTask.gpsErrUnavailable');
+      if (geoErr && typeof geoErr.code === 'number') {
+        if (geoErr.code === 1) {
+          errMsg = t('createTask.gpsErrDenied');
+        } else if (geoErr.code === 3) {
+          errMsg = t('createTask.gpsErrTimeout');
+        }
+      }
+      setGeocodingStatus({
+        type: 'error',
+        text: errMsg,
+      });
+    } finally {
+      setGpsLocating(false);
+    }
+  };
+
   const resolveCoordsForAddress = async (
     addr: string,
     latStr: string,
     lngStr: string,
-    geocodedFor: string
+    geocodedFor: string,
+    coordsSource: 'geocode' | 'gps' | null
   ): Promise<{ lat: number; lng: number }> => {
     const normalizedAddr = addr.trim().toLowerCase();
     const existingParsed = parseCoords(latStr, lngStr);
-    if (existingParsed && (!geocodedFor || geocodedFor === normalizedAddr)) {
+    if (existingParsed && (coordsSource === 'gps' || !geocodedFor || geocodedFor === normalizedAddr)) {
       return existingParsed;
     }
     const result = await searchAddressCoordinates(addr.trim());
@@ -200,7 +290,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         newObjAddress,
         newObjLat,
         newObjLng,
-        newObjGeocodedFor
+        newObjGeocodedFor,
+        newObjCoordsSource
       );
       setNewObjLat(coords.lat.toFixed(5));
       setNewObjLng(coords.lng.toFixed(5));
@@ -335,7 +426,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           cleanAddr,
           manualLat,
           manualLng,
-          manualGeocodedFor
+          manualGeocodedFor,
+          manualCoordsSource
         );
         setManualLat(coords.lat.toFixed(5));
         setManualLng(coords.lng.toFixed(5));
@@ -356,7 +448,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           cleanAddr,
           newObjLat,
           newObjLng,
-          newObjGeocodedFor
+          newObjGeocodedFor,
+          newObjCoordsSource
         );
         setNewObjLat(coords.lat.toFixed(5));
         setNewObjLng(coords.lng.toFixed(5));
@@ -617,18 +710,53 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             </div>
 
             {addressMode === 'existing' && (
-              <select
-                id="new-task-object"
-                value={objectId}
-                onChange={(e) => setObjectId(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-orange-500 focus:outline-none"
-              >
-                {objects.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name} — {o.address}
-                  </option>
-                ))}
-              </select>
+              <div className="space-y-2.5">
+                <select
+                  id="new-task-object"
+                  value={objectId}
+                  onChange={(e) => setObjectId(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-orange-500 focus:outline-none"
+                >
+                  {objects.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name} — {o.address}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => void handleUseCurrentLocation('manual')}
+                  disabled={gpsLocating}
+                  className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl border border-orange-500/40 bg-orange-50 dark:bg-orange-500/15 hover:bg-orange-100 dark:hover:bg-orange-500/25 disabled:opacity-60 px-4 py-3 text-sm font-bold text-orange-700 dark:text-orange-300 transition-colors cursor-pointer"
+                >
+                  {gpsLocating ? (
+                    <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+                  ) : (
+                    <LocateFixed className="w-5 h-5 shrink-0" />
+                  )}
+                  <span>
+                    {gpsLocating ? t('createTask.locating') : t('createTask.useCurrentLocation')}
+                  </span>
+                </button>
+
+                {geocodingStatus && (
+                  <p
+                    className={`text-xs font-medium flex items-start gap-1.5 ${
+                      geocodingStatus.type === 'success'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-red-600 dark:text-red-400'
+                    }`}
+                  >
+                    {geocodingStatus.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    )}
+                    <span>{geocodingStatus.text}</span>
+                  </p>
+                )}
+              </div>
             )}
 
             {addressMode === 'manual' && (
@@ -642,10 +770,15 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     required
                     value={manualAddress}
                     onChange={(e) => {
-                      setManualAddress(e.target.value);
-                      if (e.target.value.trim().toLowerCase() !== manualGeocodedFor) {
+                      const val = e.target.value;
+                      setManualAddress(val);
+                      if (
+                        manualCoordsSource !== 'gps' &&
+                        val.trim().toLowerCase() !== manualGeocodedFor
+                      ) {
                         setManualLat('');
                         setManualLng('');
+                        setManualCoordsSource(null);
                       }
                     }}
                     placeholder={t('createTask.objAddrPlaceholder')}
@@ -654,7 +787,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   <button
                     type="button"
                     onClick={() => void handleGeocode('manual')}
-                    disabled={geocodingLoading || !manualAddress.trim()}
+                    disabled={geocodingLoading || gpsLocating || !manualAddress.trim()}
                     className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-orange-500 hover:bg-slate-800 dark:hover:bg-orange-600 disabled:opacity-50 px-3 py-2 text-xs font-semibold text-white whitespace-nowrap cursor-pointer"
                   >
                     {geocodingLoading ? (
@@ -666,20 +799,40 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   </button>
                 </div>
 
+                <button
+                  type="button"
+                  onClick={() => void handleUseCurrentLocation('manual')}
+                  disabled={gpsLocating || geocodingLoading}
+                  className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-60 px-4 py-3 text-sm font-bold text-white shadow-sm transition-colors cursor-pointer"
+                >
+                  {gpsLocating ? (
+                    <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+                  ) : (
+                    <LocateFixed className="w-5 h-5 shrink-0" />
+                  )}
+                  <span>
+                    {gpsLocating ? t('createTask.locating') : t('createTask.useCurrentLocation')}
+                  </span>
+                </button>
+
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   {t('createTask.manualAddrHint')}
                 </p>
 
                 {geocodingStatus && (
                   <p
-                    className={`text-xs font-medium flex items-center gap-1 ${
+                    className={`text-xs font-medium flex items-start gap-1.5 ${
                       geocodingStatus.type === 'success'
                         ? 'text-emerald-600 dark:text-emerald-400'
                         : 'text-red-600 dark:text-red-400'
                     }`}
                   >
-                    {geocodingStatus.type === 'success' && <CheckCircle2 className="w-3.5 h-3.5" />}
-                    {geocodingStatus.text}
+                    {geocodingStatus.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    )}
+                    <span>{geocodingStatus.text}</span>
                   </p>
                 )}
 
@@ -691,7 +844,10 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     <input
                       type="text"
                       value={manualLat}
-                      onChange={(e) => setManualLat(e.target.value)}
+                      onChange={(e) => {
+                        setManualLat(e.target.value);
+                        setManualCoordsSource('gps');
+                      }}
                       placeholder="auto"
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
                     />
@@ -703,7 +859,10 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     <input
                       type="text"
                       value={manualLng}
-                      onChange={(e) => setManualLng(e.target.value)}
+                      onChange={(e) => {
+                        setManualLng(e.target.value);
+                        setManualCoordsSource('gps');
+                      }}
                       placeholder="auto"
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
                     />
@@ -736,10 +895,15 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                       required
                       value={newObjAddress}
                       onChange={(e) => {
-                        setNewObjAddress(e.target.value);
-                        if (e.target.value.trim().toLowerCase() !== newObjGeocodedFor) {
+                        const val = e.target.value;
+                        setNewObjAddress(val);
+                        if (
+                          newObjCoordsSource !== 'gps' &&
+                          val.trim().toLowerCase() !== newObjGeocodedFor
+                        ) {
                           setNewObjLat('');
                           setNewObjLng('');
+                          setNewObjCoordsSource(null);
                         }
                       }}
                       placeholder={t('createTask.objAddrPlaceholder')}
@@ -748,7 +912,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     <button
                       type="button"
                       onClick={() => void handleGeocode('newObject')}
-                      disabled={geocodingLoading || !newObjAddress.trim()}
+                      disabled={geocodingLoading || gpsLocating || !newObjAddress.trim()}
                       className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-orange-500 hover:bg-slate-800 dark:hover:bg-orange-600 disabled:opacity-50 px-3 py-2 text-xs font-semibold text-white whitespace-nowrap cursor-pointer"
                     >
                       {geocodingLoading ? (
@@ -761,16 +925,36 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   </div>
                 </div>
 
+                <button
+                  type="button"
+                  onClick={() => void handleUseCurrentLocation('newObject')}
+                  disabled={gpsLocating || geocodingLoading}
+                  className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-60 px-4 py-3 text-sm font-bold text-white shadow-sm transition-colors cursor-pointer"
+                >
+                  {gpsLocating ? (
+                    <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+                  ) : (
+                    <LocateFixed className="w-5 h-5 shrink-0" />
+                  )}
+                  <span>
+                    {gpsLocating ? t('createTask.locating') : t('createTask.useCurrentLocation')}
+                  </span>
+                </button>
+
                 {geocodingStatus && (
                   <p
-                    className={`text-xs font-medium flex items-center gap-1 ${
+                    className={`text-xs font-medium flex items-start gap-1.5 ${
                       geocodingStatus.type === 'success'
                         ? 'text-emerald-600 dark:text-emerald-400'
                         : 'text-red-600 dark:text-red-400'
                     }`}
                   >
-                    {geocodingStatus.type === 'success' && <CheckCircle2 className="w-3.5 h-3.5" />}
-                    {geocodingStatus.text}
+                    {geocodingStatus.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    )}
+                    <span>{geocodingStatus.text}</span>
                   </p>
                 )}
 
@@ -782,7 +966,10 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     <input
                       type="text"
                       value={newObjLat}
-                      onChange={(e) => setNewObjLat(e.target.value)}
+                      onChange={(e) => {
+                        setNewObjLat(e.target.value);
+                        setNewObjCoordsSource('gps');
+                      }}
                       placeholder="auto"
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
                     />
@@ -794,7 +981,10 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     <input
                       type="text"
                       value={newObjLng}
-                      onChange={(e) => setNewObjLng(e.target.value)}
+                      onChange={(e) => {
+                        setNewObjLng(e.target.value);
+                        setNewObjCoordsSource('gps');
+                      }}
                       placeholder="auto"
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
                     />
@@ -805,7 +995,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   <button
                     type="button"
                     onClick={handleSaveNewObject}
-                    disabled={savingObject || geocodingLoading}
+                    disabled={savingObject || geocodingLoading || gpsLocating}
                     className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-3 py-1.5 text-xs font-semibold text-white cursor-pointer"
                   >
                     {savingObject ? (
