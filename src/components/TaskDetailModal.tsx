@@ -4,6 +4,7 @@ import {
   Camera,
   Check,
   CheckCircle2,
+  FileText,
   ImagePlus,
   MapPin,
   PenTool,
@@ -23,6 +24,7 @@ import {
 import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { BIN_VISUAL_META } from '../utils/binMeta';
+import { exportTaskProtocolPDF } from '../utils/pdfExport';
 
 interface TaskDetailModalProps {
   task: FacilityTask;
@@ -39,12 +41,13 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onClose,
   onUpdateTask,
 }) => {
-  const { t, tCategory, tStatus, tBin } = useTranslation();
+  const { t, tCategory, tStatus, tBin, docLanguage } = useTranslation();
   const [notes, setNotes] = useState(task.notes);
   const [newCheckItem, setNewCheckItem] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<TaskPhoto | null>(null);
 
   // Signature pad refs
@@ -87,10 +90,15 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   };
 
   const handleStatusChange = async (status: TaskStatus) => {
-    await onUpdateTask(task.id, {
-      status,
-      completed_at: status === 'erledigt' ? new Date().toISOString() : undefined,
-    });
+    setUpdatingStatus(true);
+    try {
+      await onUpdateTask(task.id, {
+        status,
+        completed_at: status === 'erledigt' ? new Date().toISOString() : undefined,
+      });
+    } finally {
+      setUpdatingStatus(false);
+    }
   };
 
   const handlePhotoUpload = async (
@@ -276,8 +284,9 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     <button
                       key={st}
                       type="button"
+                      disabled={updatingStatus}
                       onClick={() => handleStatusChange(st)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60 ${
                         active
                           ? st === 'erledigt'
                             ? 'bg-emerald-600 text-white'
@@ -292,6 +301,30 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   );
                 })}
               </div>
+              {(task.status === 'erledigt' || task.completed_at) && (
+                <div className="mt-2.5 pt-2 border-t border-slate-200/80 dark:border-slate-700/80 text-[11px] text-slate-600 dark:text-slate-300 space-y-0.5 font-mono">
+                  {task.completed_at && (
+                    <p>
+                      <span className="font-sans font-semibold text-emerald-700 dark:text-emerald-400">
+                        {t('taskModal.completedAtLabel')}:
+                      </span>{' '}
+                      {formatDateTimeDE(task.completed_at)}
+                    </p>
+                  )}
+                  <p>
+                    <span className="font-sans font-semibold text-slate-600 dark:text-slate-300">
+                      {t('taskModal.completedGpsLabel')}:
+                    </span>{' '}
+                    {typeof task.completed_lat === 'number' && typeof task.completed_lng === 'number'
+                      ? `${task.completed_lat.toFixed(6)}, ${task.completed_lng.toFixed(6)}${
+                          typeof task.completed_accuracy === 'number'
+                            ? ` (± ${Math.round(task.completed_accuracy)} m)`
+                            : ''
+                        }`
+                      : t('taskModal.gpsUnavailable')}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -563,19 +596,41 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             {t('common.close')}
           </button>
 
-          {task.status !== 'erledigt' && (
-            <label className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white cursor-pointer transition-colors">
-              <Camera className="w-4 h-4" />
-              <span>{t('common.photoCompleteBtn')}</span>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={(e) => handlePhotoUpload(e, true)}
-              />
-            </label>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                exportTaskProtocolPDF({
+                  task,
+                  obj: objectItem,
+                  worker: assignee,
+                  docLang: docLanguage,
+                })
+              }
+              className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                task.status === 'erledigt'
+                  ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm'
+                  : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              <span>{t('tasks.pdfProtocol')}</span>
+            </button>
+
+            {task.status !== 'erledigt' && (
+              <label className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white cursor-pointer transition-colors">
+                <Camera className="w-4 h-4" />
+                <span>{t('common.photoCompleteBtn')}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => handlePhotoUpload(e, true)}
+                />
+              </label>
+            )}
+          </div>
         </div>
       </div>
 

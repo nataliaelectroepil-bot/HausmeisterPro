@@ -70,6 +70,9 @@ export interface FacilityTask {
   lng?: number;
   signature?: string; // base64 PNG dataUrl
   completed_at?: string;
+  completed_lat?: number;
+  completed_lng?: number;
+  completed_accuracy?: number;
 }
 
 export type BinType = 'Restmüll' | 'Papier' | 'Gelbe Tonne' | 'Bio';

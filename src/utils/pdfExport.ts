@@ -873,3 +873,439 @@ export function exportGardenBillingPDF({
     `Leistungsnachweis_Garten_${(obj?.name ?? 'Objekte').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
   );
 }
+
+function sanitizeHelveticaText(input: string): string {
+  return input
+    .replace(/č/g, 'c')
+    .replace(/Č/g, 'C')
+    .replace(/ć/g, 'c')
+    .replace(/Ć/g, 'C')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .replace(/š/g, 's')
+    .replace(/Š/g, 'S')
+    .replace(/ž/g, 'z')
+    .replace(/Ž/g, 'Z')
+    .replace(/ł/g, 'l')
+    .replace(/Ł/g, 'L')
+    .replace(/ą/g, 'a')
+    .replace(/Ą/g, 'A')
+    .replace(/ę/g, 'e')
+    .replace(/Ę/g, 'E')
+    .replace(/ń/g, 'n')
+    .replace(/Ń/g, 'N')
+    .replace(/ś/g, 's')
+    .replace(/Ś/g, 'S')
+    .replace(/ź/g, 'z')
+    .replace(/Ź/g, 'Z')
+    .replace(/ż/g, 'z')
+    .replace(/Ż/g, 'Z')
+    .replace(/ğ/g, 'g')
+    .replace(/Ğ/g, 'G')
+    .replace(/ş/g, 's')
+    .replace(/Ş/g, 'S')
+    .replace(/ı/g, 'i')
+    .replace(/İ/g, 'I');
+}
+
+export function exportTaskProtocolPDF({
+  task,
+  obj,
+  worker,
+  docLang = 'DE',
+}: {
+  task: FacilityTask;
+  obj?: PropertyObject;
+  worker?: User;
+  docLang?: DocLanguageCode;
+}): void {
+  const L = PDF_LABELS[docLang] ?? PDF_LABELS.DE;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 16;
+  const contentWidth = pageWidth - margin * 2;
+  const generatedAt = new Date();
+  const generatedLabel = `${generatedAt.toLocaleDateString('de-DE')} ${generatedAt.toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })}`;
+
+  const txt = (val: string) => sanitizeHelveticaText(safePdfText(val, docLang));
+
+  const labels =
+    docLang === 'EN'
+      ? {
+          subtitle: 'LEISTUNGSNACHWEIS / EINSATZPROTOKOLL (Service Record)',
+          orderId: 'Order ID:',
+          generated: 'Generated:',
+          object: 'Property:',
+          address: 'Address:',
+          objectCoords: 'Property GPS:',
+          category: 'Category:',
+          status: 'Status:',
+          worker: 'Employee:',
+          createdAt: 'Erstellt am:',
+          dueAt: 'Due at:',
+          completedAt: 'Erledigt am:',
+          notCompleted: 'Not yet completed',
+          completedGps: 'GPS-Standort bei Abschluss:',
+          gpsMissing: 'Not available (GPS permission denied or offline)',
+          taskTitle: 'Task:',
+          binTypes: 'Bin Types:',
+          description: 'Description:',
+          checklist: 'Checklist:',
+          closingNotes: 'Abschlussnotiz:',
+          photosTitle: 'Fotodokumentation:',
+          noPhotos: 'No proof photos uploaded.',
+          photoErr: 'Proof photo saved (image could not be embedded).',
+          sigWorker: 'Unterschrift Mitarbeiter',
+          sigClient: 'Unterschrift Auftraggeber',
+          legalClause:
+            'Elektronischer Leistungsnachweis gemäß Verkehrssicherungspflicht · Digital verification record',
+        }
+      : {
+          subtitle: 'LEISTUNGSNACHWEIS / EINSATZPROTOKOLL',
+          orderId: 'Auftrags-ID:',
+          generated: 'Erstellt / Druck:',
+          object: 'Objekt:',
+          address: 'Adresse:',
+          objectCoords: 'Objekt-Koordinaten:',
+          category: 'Kategorie:',
+          status: 'Status / Priorität:',
+          worker: 'Mitarbeiter:',
+          createdAt: 'Erstellt am:',
+          dueAt: 'Fällig am:',
+          completedAt: 'Erledigt am:',
+          notCompleted: 'Noch nicht abgeschlossen',
+          completedGps: 'GPS-Standort bei Abschluss:',
+          gpsMissing: 'Nicht verfügbar (GPS nicht freigegeben oder kein Signal)',
+          taskTitle: 'Aufgabe:',
+          binTypes: 'Tonnenarten:',
+          description: 'Beschreibung:',
+          checklist: 'Checkliste:',
+          closingNotes: 'Abschlussnotiz:',
+          photosTitle: 'Fotodokumentation:',
+          noPhotos: 'Keine Nachweisfotos hochgeladen.',
+          photoErr: 'Nachweisfoto vorhanden (Bildformat nicht direkt einbettbar).',
+          sigWorker: 'Unterschrift Mitarbeiter',
+          sigClient: 'Unterschrift Auftraggeber',
+          legalClause: 'Elektronischer Leistungsnachweis gemäß Verkehrssicherungspflicht',
+        };
+
+  drawBrandHeader(
+    doc,
+    labels.subtitle,
+    `${labels.orderId} ${task.id}`,
+    `${labels.generated} ${generatedLabel}`,
+    docLang
+  );
+
+  const objectName = obj?.name ?? (task.address || '—');
+  const fullAddress = obj?.address ?? task.address ?? '—';
+  const objLat = obj?.lat ?? task.lat;
+  const objLng = obj?.lng ?? task.lng;
+  const objCoordsStr =
+    typeof objLat === 'number' &&
+    typeof objLng === 'number' &&
+    Number.isFinite(objLat) &&
+    Number.isFinite(objLng) &&
+    !(objLat === 0 && objLng === 0)
+      ? `${objLat.toFixed(6)}, ${objLng.toFixed(6)}`
+      : '—';
+
+  const statusText =
+    task.status === 'erledigt'
+      ? docLang === 'EN'
+        ? 'Completed'
+        : 'Erledigt'
+      : task.status === 'in_bearbeitung'
+        ? docLang === 'EN'
+          ? 'In Progress'
+          : 'In Bearbeitung'
+        : docLang === 'EN'
+          ? 'Open'
+          : 'Offen';
+  const prioText =
+    task.priority === 'dringend'
+      ? docLang === 'EN'
+        ? 'Urgent'
+        : 'Dringend'
+      : task.priority === 'hoch'
+        ? docLang === 'EN'
+          ? 'High'
+          : 'Hoch'
+        : 'Normal';
+  const categoryText = CATEGORY_LABELS[task.category]?.[docLang] ?? task.category;
+  const workerText = worker ? `${worker.name} (${worker.employee_id})` : L.unassigned;
+
+  // Box 1: Object & Order Metadata
+  let y = 40;
+  const addrLines = doc.splitTextToSize(txt(fullAddress), contentWidth - 46);
+  const box1Height = Math.max(46, 39 + Math.max(1, addrLines.length) * 5);
+
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, y, contentWidth, box1Height, 2, 2, 'FD');
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(9.5);
+
+  let rowY = y + 7.5;
+  const labelX = margin + 5;
+  const valueX = margin + 45;
+
+  const drawMetaRow = (label: string, value: string | string[]) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(51, 65, 85);
+    doc.text(txt(label), labelX, rowY);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(15, 23, 42);
+    if (Array.isArray(value)) {
+      doc.text(value, valueX, rowY);
+      rowY += Math.max(1, value.length) * 5 + 1.5;
+    } else {
+      doc.text(txt(value), valueX, rowY);
+      rowY += 6.5;
+    }
+  };
+
+  drawMetaRow(labels.orderId, task.id);
+  drawMetaRow(labels.object, objectName);
+  drawMetaRow(labels.address, addrLines);
+  drawMetaRow(labels.objectCoords, objCoordsStr);
+  drawMetaRow(labels.category, `${categoryText}  |  ${statusText} (${prioText})`);
+  drawMetaRow(labels.worker, workerText);
+
+  y += box1Height + 5;
+
+  // Box 2: Timestamps & Worker Completion GPS Audit
+  const createdStr = task.created_at ? formatDateTimeDE(task.created_at) : '—';
+  const dueStr = task.due_date ? formatDateTimeDE(task.due_date) : '—';
+  const completedStr = task.completed_at ? formatDateTimeDE(task.completed_at) : labels.notCompleted;
+  const completionGpsStr =
+    typeof task.completed_lat === 'number' &&
+    typeof task.completed_lng === 'number' &&
+    Number.isFinite(task.completed_lat) &&
+    Number.isFinite(task.completed_lng)
+      ? `${task.completed_lat.toFixed(6)}, ${task.completed_lng.toFixed(6)}${
+          typeof task.completed_accuracy === 'number'
+            ? ` (+/- ${Math.round(task.completed_accuracy)} m)`
+            : ''
+        }`
+      : labels.gpsMissing;
+
+  const gpsLines = doc.splitTextToSize(txt(completionGpsStr), contentWidth - 58);
+  const box2Height = 27 + Math.max(1, gpsLines.length) * 5;
+
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, y, contentWidth, box2Height, 2, 2, 'FD');
+
+  let auditY = y + 7.5;
+  const auditValX = margin + 56;
+  doc.setFontSize(9.5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text(txt(labels.createdAt), labelX, auditY);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${createdStr}   (${labels.dueAt} ${dueStr})`, auditValX, auditY);
+  auditY += 6.5;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text(txt(labels.completedAt), labelX, auditY);
+  doc.setFont('helvetica', task.completed_at ? 'bold' : 'normal');
+  doc.setTextColor(task.completed_at ? 5 : 100, task.completed_at ? 150 : 116, task.completed_at ? 105 : 139);
+  doc.text(txt(completedStr), auditValX, auditY);
+  auditY += 6.5;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text(txt(labels.completedGps), labelX, auditY);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(15, 23, 42);
+  doc.text(gpsLines, auditValX, auditY);
+
+  y += box2Height + 7;
+
+  const ensurePageSpace = (neededMm: number) => {
+    if (y + neededMm > pageHeight - 24) {
+      doc.addPage();
+      y = 18;
+    }
+  };
+
+  // Section 3: Task Details, Checklist & Closing Notes
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.setTextColor(15, 23, 42);
+  const titleLines = doc.splitTextToSize(txt(`${labels.taskTitle} ${task.title}`), contentWidth);
+  ensurePageSpace(titleLines.length * 5.5 + 8);
+  doc.text(titleLines, margin, y);
+  y += titleLines.length * 5.5 + 3;
+
+  if (task.bin_types && task.bin_types.length > 0) {
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(51, 65, 85);
+    const binLine = `${labels.binTypes} ${task.bin_types.join(', ')}`;
+    ensurePageSpace(7);
+    doc.text(txt(binLine), margin, y);
+    y += 6;
+  }
+
+  if (task.description?.trim()) {
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(51, 65, 85);
+    ensurePageSpace(12);
+    doc.text(txt(labels.description), margin, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(15, 23, 42);
+    const descLines = doc.splitTextToSize(txt(task.description.trim()), contentWidth);
+    ensurePageSpace(descLines.length * 4.8 + 4);
+    doc.text(descLines, margin, y);
+    y += descLines.length * 4.8 + 4;
+  }
+
+  if (task.checklist_json && task.checklist_json.length > 0) {
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(51, 65, 85);
+    ensurePageSpace(10);
+    doc.text(txt(labels.checklist), margin, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    task.checklist_json.forEach((item) => {
+      const checkLine = `${item.checked ? '[x]' : '[ ]'} ${item.label}`;
+      const wrapped = doc.splitTextToSize(txt(checkLine), contentWidth - 4);
+      ensurePageSpace(wrapped.length * 4.4 + 2);
+      doc.setTextColor(item.checked ? 5 : 51, item.checked ? 150 : 65, item.checked ? 105 : 85);
+      doc.text(wrapped, margin + 2, y);
+      y += wrapped.length * 4.4 + 1.2;
+    });
+    y += 3;
+  }
+
+  // Closing notes
+  const notesText = task.notes?.trim() ? task.notes.trim() : '—';
+  doc.setFontSize(9.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(51, 65, 85);
+  ensurePageSpace(14);
+  doc.text(txt(labels.closingNotes), margin, y);
+  y += 5;
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(15, 23, 42);
+  const noteLines = doc.splitTextToSize(txt(notesText), contentWidth);
+  ensurePageSpace(noteLines.length * 4.8 + 6);
+  doc.text(noteLines, margin, y);
+  y += noteLines.length * 4.8 + 6;
+
+  // Section 4: Photo Documentation
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  ensurePageSpace(12);
+  doc.text(txt(`${labels.photosTitle} (${task.photos.length})`), margin, y);
+  y += 5;
+
+  if (task.photos.length === 0) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.text(txt(labels.noPhotos), margin, y + 2);
+    y += 10;
+  } else {
+    const imgWidth = 84;
+    const imgHeight = 52;
+    const colGap = 10;
+
+    for (let i = 0; i < task.photos.length; i += 2) {
+      ensurePageSpace(imgHeight + 14);
+      for (let col = 0; col < 2; col++) {
+        const photo = task.photos[i + col];
+        if (!photo) continue;
+        const x = margin + col * (imgWidth + colGap);
+        const fmt = photo.dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+        try {
+          doc.addImage(photo.dataUrl, fmt, x, y, imgWidth, imgHeight);
+        } catch {
+          doc.setDrawColor(203, 213, 225);
+          doc.rect(x, y, imgWidth, imgHeight);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor(100, 116, 139);
+          doc.text(txt(labels.photoErr), x + 3, y + imgHeight / 2);
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(71, 85, 105);
+        const photoMeta =
+          typeof photo.lat === 'number' && typeof photo.lng === 'number'
+            ? `${formatDateTimeDE(photo.timestamp)} | ${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}`
+            : formatDateTimeDE(photo.timestamp);
+        doc.text(txt(photoMeta), x, y + imgHeight + 4);
+      }
+      y += imgHeight + 11;
+    }
+  }
+
+  // Section 5: Signature Lines & Legal Footer
+  const footerHeight = 46;
+  if (y + footerHeight > pageHeight - 10) {
+    doc.addPage();
+    y = 20;
+  }
+  const sigBaseY = Math.max(y + 8, pageHeight - 48);
+
+  if (task.signature) {
+    try {
+      doc.addImage(task.signature, 'PNG', margin, sigBaseY - 2, 54, 18);
+    } catch {
+      // ignore signature embed error
+    }
+  }
+
+  const lineY = sigBaseY + 18;
+  doc.setDrawColor(148, 163, 184);
+  doc.line(margin, lineY, margin + 78, lineY);
+  doc.line(margin + 96, lineY, pageWidth - margin, lineY);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(txt(labels.sigWorker), margin, lineY + 4.5);
+  if (worker?.name) {
+    doc.setFontSize(7.5);
+    doc.text(txt(worker.name), margin, lineY + 8.5);
+  }
+  doc.setFontSize(8.5);
+  doc.text(txt(labels.sigClient), margin + 96, lineY + 4.5);
+
+  // Legal Clause Footer Box
+  const legalY = lineY + 15;
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, legalY - 3.5, pageWidth - margin, legalY - 3.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(51, 65, 85);
+  doc.text(txt(labels.legalClause), pageWidth / 2, legalY + 1, { align: 'center' });
+
+  const datePart = (task.completed_at || task.due_date || new Date().toISOString()).slice(0, 10);
+  const safeTaskName =
+    sanitizeHelveticaText(task.title)
+      .trim()
+      .replace(/[^a-zA-Z0-9äöüÄÖÜß_-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 50) || 'Aufgabe';
+
+  doc.save(`Einsatzprotokoll_${datePart}_${safeTaskName}.pdf`);
+}
+

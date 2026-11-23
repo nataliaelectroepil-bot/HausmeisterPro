@@ -40,6 +40,7 @@ import {
   WinterLog,
 } from './types/facility';
 import { getISOWeekAndYear, isDateTomorrow, isTaskOverdue } from './utils/dateUtils';
+import { captureCurrentPosition } from './utils/geolocation';
 
 function LoadingScreen() {
   const { t } = useTranslation();
@@ -305,7 +306,26 @@ export default function App() {
 
   const handleUpdateTask = useCallback(
     async (taskId: string, patch: Partial<FacilityTask>) => {
-      const updated = await pocketbaseService.updateTask(taskId, patch);
+      let nextPatch: Partial<FacilityTask> = { ...patch };
+      if (patch.status === 'erledigt') {
+        const completedAt = patch.completed_at || new Date().toISOString();
+        let coords: { lat: number; lng: number; accuracy?: number } | null = null;
+        if (patch.completed_lat === undefined || patch.completed_lng === undefined) {
+          coords = await captureCurrentPosition();
+        }
+        nextPatch = {
+          ...nextPatch,
+          completed_at: completedAt,
+          ...(coords
+            ? {
+                completed_lat: coords.lat,
+                completed_lng: coords.lng,
+                completed_accuracy: coords.accuracy,
+              }
+            : {}),
+        };
+      }
+      const updated = await pocketbaseService.updateTask(taskId, nextPatch);
       setTasks(updated);
     },
     []
@@ -313,10 +333,18 @@ export default function App() {
 
   const handleQuickCompleteWithPhoto = useCallback(
     async (task: FacilityTask, photo: TaskPhoto) => {
+      const coords = await captureCurrentPosition();
       const updated = await pocketbaseService.updateTask(task.id, {
         photos: [...task.photos, photo],
         status: 'erledigt',
         completed_at: new Date().toISOString(),
+        ...(coords
+          ? {
+              completed_lat: coords.lat,
+              completed_lng: coords.lng,
+              completed_accuracy: coords.accuracy,
+            }
+          : {}),
       });
       setTasks(updated);
     },

@@ -214,12 +214,39 @@ async function pbRequest<T>(path: string, init?: RequestInit): Promise<T | null>
 }
 
 function normalizeTaskRecord(task: FacilityTask): FacilityTask {
+  const rawTask = task as FacilityTask & {
+    completedAt?: string;
+    completedLat?: number | string;
+    completedLng?: number | string;
+    completedAccuracy?: number | string;
+  };
   const rawLat = typeof task.lat === 'number' ? task.lat : Number(task.lat);
   const rawLng = typeof task.lng === 'number' ? task.lng : Number(task.lng);
   const hasCoords =
     Number.isFinite(rawLat) &&
     Number.isFinite(rawLng) &&
     !(rawLat === 0 && rawLng === 0);
+
+  const rawCompletedLat =
+    task.completed_lat !== undefined ? Number(task.completed_lat) : Number(rawTask.completedLat);
+  const rawCompletedLng =
+    task.completed_lng !== undefined ? Number(task.completed_lng) : Number(rawTask.completedLng);
+  const hasCompletedCoords =
+    Number.isFinite(rawCompletedLat) &&
+    Number.isFinite(rawCompletedLng) &&
+    !(rawCompletedLat === 0 && rawCompletedLng === 0);
+
+  const rawCompletedAccuracy =
+    task.completed_accuracy !== undefined
+      ? Number(task.completed_accuracy)
+      : Number(rawTask.completedAccuracy);
+
+  const completedAt =
+    typeof task.completed_at === 'string' && task.completed_at.trim()
+      ? task.completed_at
+      : typeof rawTask.completedAt === 'string' && rawTask.completedAt.trim()
+        ? rawTask.completedAt
+        : undefined;
 
   return {
     ...task,
@@ -229,6 +256,13 @@ function normalizeTaskRecord(task: FacilityTask): FacilityTask {
     address: typeof task.address === 'string' && task.address.trim() ? task.address.trim() : undefined,
     lat: hasCoords ? rawLat : undefined,
     lng: hasCoords ? rawLng : undefined,
+    completed_at: completedAt,
+    completed_lat: hasCompletedCoords ? rawCompletedLat : undefined,
+    completed_lng: hasCompletedCoords ? rawCompletedLng : undefined,
+    completed_accuracy:
+      Number.isFinite(rawCompletedAccuracy) && rawCompletedAccuracy >= 0
+        ? rawCompletedAccuracy
+        : undefined,
     notes: typeof task.notes === 'string' ? task.notes : '',
     description: typeof task.description === 'string' ? task.description : '',
   };
@@ -1534,14 +1568,31 @@ export const pocketbaseService = {
 
   async updateTask(id: string, patch: Partial<FacilityTask>): Promise<FacilityTask[]> {
     if (this.isPocketBaseEnabled()) {
+      const pbPatch: Record<string, unknown> = { ...patch };
+      if (patch.status && patch.status !== 'erledigt') {
+        pbPatch.completed_at = null;
+        pbPatch.completed_lat = null;
+        pbPatch.completed_lng = null;
+        pbPatch.completed_accuracy = null;
+      }
       await pbRequest(`/api/collections/${pocketbaseConfig.collections.tasks}/records/${id}`, {
         method: 'PATCH',
-        body: JSON.stringify(patch),
+        body: JSON.stringify(pbPatch),
       });
       return this.getTasks();
     }
     const list = await this.getTasks();
-    const updated = list.map((t) => (t.id === id ? { ...t, ...patch } : t));
+    const updated = list.map((t) => {
+      if (t.id !== id) return t;
+      const merged: FacilityTask = { ...t, ...patch };
+      if (patch.status && patch.status !== 'erledigt') {
+        merged.completed_at = undefined;
+        merged.completed_lat = undefined;
+        merged.completed_lng = undefined;
+        merged.completed_accuracy = undefined;
+      }
+      return merged;
+    });
     writeStorage(STORAGE_KEYS.tasks, updated);
     return updated;
   },

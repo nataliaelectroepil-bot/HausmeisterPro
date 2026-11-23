@@ -199,6 +199,7 @@ const DE = {
   'tasks.emptyTitle': 'Keine Aufgaben in diesem Status',
   'tasks.emptySub': 'Wählen Sie einen anderen Status oder passen Sie die Kategoriefilter an.',
   'tasks.savingPhoto': 'Wird gespeichert...',
+  'tasks.pdfProtocol': 'PDF Protokoll',
 
   // Task Detail Modal
   'taskModal.objectAddress': 'Objekt & Adresse',
@@ -220,6 +221,9 @@ const DE = {
   'taskModal.signed': 'Digital signiert',
   'taskModal.signHint': 'Bitte im Feld oben unterschreiben',
   'taskModal.saveSignature': 'Unterschrift speichern',
+  'taskModal.completedAtLabel': 'Erledigt am',
+  'taskModal.completedGpsLabel': 'GPS bei Abschluss',
+  'taskModal.gpsUnavailable': 'GPS nicht verfügbar',
 
   // Create Task Modal
   'createTask.title': 'Neue Aufgabe anlegen',
@@ -659,6 +663,7 @@ const EN: Record<TranslationKey, string> = {
   'tasks.emptyTitle': 'No tasks in this status',
   'tasks.emptySub': 'Select another status or adjust the category filters.',
   'tasks.savingPhoto': 'Saving...',
+  'tasks.pdfProtocol': 'PDF Protokoll',
 
   'taskModal.objectAddress': 'Property & Address',
   'taskModal.unknownObject': 'Unknown Property',
@@ -679,6 +684,9 @@ const EN: Record<TranslationKey, string> = {
   'taskModal.signed': 'Digitally signed',
   'taskModal.signHint': 'Please sign inside the box above',
   'taskModal.saveSignature': 'Save Signature',
+  'taskModal.completedAtLabel': 'Completed at',
+  'taskModal.completedGpsLabel': 'Completion GPS',
+  'taskModal.gpsUnavailable': 'GPS unavailable',
 
   'createTask.title': 'Create New Task',
   'createTask.jobType': 'Service Category',
@@ -1105,6 +1113,7 @@ const HR: Record<TranslationKey, string> = {
   'tasks.emptyTitle': 'Nema zadataka u ovom statusu',
   'tasks.emptySub': 'Odaberite drugi status ili promijenite filter kategorije.',
   'tasks.savingPhoto': 'Spremanje...',
+  'tasks.pdfProtocol': 'PDF Protokoll',
 
   'taskModal.objectAddress': 'Objekt i adresa',
   'taskModal.unknownObject': 'Nepoznat objekt',
@@ -1125,6 +1134,9 @@ const HR: Record<TranslationKey, string> = {
   'taskModal.signed': 'Digitalno potpisano',
   'taskModal.signHint': 'Molimo potpišite u polju iznad',
   'taskModal.saveSignature': 'Spremi potpis',
+  'taskModal.completedAtLabel': 'Završeno',
+  'taskModal.completedGpsLabel': 'GPS pri završetku',
+  'taskModal.gpsUnavailable': 'GPS nije dostupan',
 
   'createTask.title': 'Novi radni zadatak',
   'createTask.jobType': 'Vrsta posla',
@@ -1551,6 +1563,7 @@ const SQ: Record<TranslationKey, string> = {
   'tasks.emptyTitle': 'Nuk ka detyra në këtë status',
   'tasks.emptySub': 'Zgjidhni një status tjetër ose ndryshoni filtrat.',
   'tasks.savingPhoto': 'Duke ruajtur...',
+  'tasks.pdfProtocol': 'PDF Protokoll',
 
   'taskModal.objectAddress': 'Objekti dhe adresa',
   'taskModal.unknownObject': 'Objekt i panjohur',
@@ -1571,6 +1584,9 @@ const SQ: Record<TranslationKey, string> = {
   'taskModal.signed': 'Nënshkruar digjitalisht',
   'taskModal.signHint': 'Ju lutemi nënshkruani në fushën sipër',
   'taskModal.saveSignature': 'Ruaj nënshkrimin',
+  'taskModal.completedAtLabel': 'Përfunduar më',
+  'taskModal.completedGpsLabel': 'GPS në përfundim',
+  'taskModal.gpsUnavailable': 'GPS i padisponueshëm',
 
   'createTask.title': 'Krijo detyrë të re',
   'createTask.jobType': 'Lloji i punës',
@@ -1997,6 +2013,7 @@ const PL: Record<TranslationKey, string> = {
   'tasks.emptyTitle': 'Brak zadań o tym statusie',
   'tasks.emptySub': 'Wybierz inny status lub zmień filtry kategorii.',
   'tasks.savingPhoto': 'Zapisywanie...',
+  'tasks.pdfProtocol': 'PDF Protokoll',
 
   'taskModal.objectAddress': 'Obiekt i adres',
   'taskModal.unknownObject': 'Nieznany obiekt',
@@ -2017,6 +2034,9 @@ const PL: Record<TranslationKey, string> = {
   'taskModal.signed': 'Podpisano cyfrowo',
   'taskModal.signHint': 'Proszę złożyć podpis w polu powyżej',
   'taskModal.saveSignature': 'Zapisz podpis',
+  'taskModal.completedAtLabel': 'Zakończono',
+  'taskModal.completedGpsLabel': 'GPS przy zakończeniu',
+  'taskModal.gpsUnavailable': 'GPS niedostępny',
 
   'createTask.title': 'Utwórz nowe zadanie',
   'createTask.jobType': 'Rodzaj pracy',
@@ -2443,6 +2463,7 @@ const TR: Record<TranslationKey, string> = {
   'tasks.emptyTitle': 'Bu durumda görev yok',
   'tasks.emptySub': 'Başka bir durum seçin veya kategori filtrelerini değiştirin.',
   'tasks.savingPhoto': 'Kaydediliyor...',
+  'tasks.pdfProtocol': 'PDF Protokoll',
 
   'taskModal.objectAddress': 'Bina ve Adres',
   'taskModal.unknownObject': 'Bilinmeyen Bina',
@@ -2463,6 +2484,9 @@ const TR: Record<TranslationKey, string> = {
   'taskModal.signed': 'Dijital imzalandı',
   'taskModal.signHint': 'Lütfen yukarıdaki alana imza atın',
   'taskModal.saveSignature': 'İmzayı Kaydet',
+  'taskModal.completedAtLabel': 'Tamamlanma zamanı',
+  'taskModal.completedGpsLabel': 'Tamamlama GPS',
+  'taskModal.gpsUnavailable': 'GPS kullanılamıyor',
 
   'createTask.title': 'Yeni Görev Oluştur',
   'createTask.jobType': 'İş Kategorisi',
@@ -2889,6 +2913,7 @@ const RU: Record<TranslationKey, string> = {
   'tasks.emptyTitle': 'Нет задач с этим статусом',
   'tasks.emptySub': 'Выберите другой статус или измените фильтры категорий.',
   'tasks.savingPhoto': 'Сохранение...',
+  'tasks.pdfProtocol': 'PDF Protokoll',
 
   'taskModal.objectAddress': 'Объект и адрес',
   'taskModal.unknownObject': 'Неизвестный объект',
@@ -2909,6 +2934,9 @@ const RU: Record<TranslationKey, string> = {
   'taskModal.signed': 'Подписано',
   'taskModal.signHint': 'Распишитесь в поле выше',
   'taskModal.saveSignature': 'Сохранить подпись',
+  'taskModal.completedAtLabel': 'Выполнено',
+  'taskModal.completedGpsLabel': 'GPS при завершении',
+  'taskModal.gpsUnavailable': 'GPS недоступен',
 
   'createTask.title': 'Создать новую задачу',
   'createTask.jobType': 'Тип работы',
