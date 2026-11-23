@@ -487,9 +487,9 @@ export const BinsTab: React.FC<BinsTabProps> = ({
                           <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                           <span>
                             <strong className="font-semibold text-slate-800 dark:text-slate-100">
-                              {obj?.name ?? t('common.object')}
+                              {obj?.name ?? (task.address || t('common.object'))}
                             </strong>{' '}
-                            · {obj?.address ?? '—'}
+                            · {obj?.address ?? task.address ?? '—'}
                           </span>
                         </p>
 

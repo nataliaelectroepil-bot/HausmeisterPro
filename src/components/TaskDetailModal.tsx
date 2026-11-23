@@ -255,11 +255,11 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 {t('taskModal.objectAddress')}
               </p>
               <p className="mt-0.5 font-semibold text-slate-900 dark:text-white">
-                {objectItem?.name ?? t('taskModal.unknownObject')}
+                {objectItem?.name ?? (task.address || t('taskModal.unknownObject'))}
               </p>
               <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1 mt-0.5">
                 <MapPin className="w-3.5 h-3.5 text-orange-500 shrink-0" />
-                <span>{objectItem?.address ?? '—'}</span>
+                <span>{objectItem?.address ?? task.address ?? '—'}</span>
               </p>
             </div>
             <div>

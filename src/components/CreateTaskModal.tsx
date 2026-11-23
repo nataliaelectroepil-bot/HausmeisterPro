@@ -87,6 +87,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [binValidationError, setBinValidationError] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [addressMode, setAddressMode] = useState<'existing' | 'manual' | 'newObject'>(
+    objects.length > 0 ? 'existing' : 'manual'
+  );
   const [objectId, setObjectId] = useState<string>(objects[0]?.id ?? '');
   const [assignedTo, setAssignedTo] = useState<string>(currentUser.id);
   const [priority, setPriority] = useState<TaskPriority>('normal');
@@ -97,12 +100,18 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [savingObject, setSavingObject] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
+  // Manual standalone task address + auto-geocoding
+  const [manualAddress, setManualAddress] = useState('');
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
+  const [manualGeocodedFor, setManualGeocodedFor] = useState('');
+
   // New Object inline creation + Nominatim geocoding
-  const [showNewObjectForm, setShowNewObjectForm] = useState(false);
   const [newObjName, setNewObjName] = useState('');
   const [newObjAddress, setNewObjAddress] = useState('');
   const [newObjLat, setNewObjLat] = useState<string>('');
   const [newObjLng, setNewObjLng] = useState<string>('');
+  const [newObjGeocodedFor, setNewObjGeocodedFor] = useState('');
   const [geocodingLoading, setGeocodingLoading] = useState(false);
   const [geocodingStatus, setGeocodingStatus] = useState<{
     type: 'success' | 'error';
@@ -117,14 +126,31 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
   const selectedObject = objects.find((o) => o.id === objectId);
 
-  const handleGeocode = async () => {
+  const parseCoords = (latStr: string, lngStr: string): { lat: number; lng: number } | null => {
+    const lat = parseFloat(latStr.replace(',', '.'));
+    const lng = parseFloat(lngStr.replace(',', '.'));
+    if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) {
+      return { lat, lng };
+    }
+    return null;
+  };
+
+  const handleGeocode = async (target: 'manual' | 'newObject') => {
+    const addr = (target === 'manual' ? manualAddress : newObjAddress).trim();
     setGeocodingLoading(true);
     setGeocodingStatus(null);
     setModalError(null);
     try {
-      const result = await searchAddressCoordinates(newObjAddress);
-      setNewObjLat(result.lat.toFixed(5));
-      setNewObjLng(result.lng.toFixed(5));
+      const result = await searchAddressCoordinates(addr);
+      if (target === 'manual') {
+        setManualLat(result.lat.toFixed(5));
+        setManualLng(result.lng.toFixed(5));
+        setManualGeocodedFor(addr.toLowerCase());
+      } else {
+        setNewObjLat(result.lat.toFixed(5));
+        setNewObjLng(result.lng.toFixed(5));
+        setNewObjGeocodedFor(addr.toLowerCase());
+      }
       setGeocodingStatus({
         type: 'success',
         text: t('createTask.coordsFound', {
@@ -142,6 +168,21 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   };
 
+  const resolveCoordsForAddress = async (
+    addr: string,
+    latStr: string,
+    lngStr: string,
+    geocodedFor: string
+  ): Promise<{ lat: number; lng: number }> => {
+    const normalizedAddr = addr.trim().toLowerCase();
+    const existingParsed = parseCoords(latStr, lngStr);
+    if (existingParsed && (!geocodedFor || geocodedFor === normalizedAddr)) {
+      return existingParsed;
+    }
+    const result = await searchAddressCoordinates(addr.trim());
+    return { lat: result.lat, lng: result.lng };
+  };
+
   const handleSaveNewObject = async () => {
     setModalError(null);
     if (!newObjName.trim() || !newObjAddress.trim()) {
@@ -152,25 +193,26 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       return;
     }
 
-    let parsedLat = parseFloat(newObjLat.replace(',', '.'));
-    let parsedLng = parseFloat(newObjLng.replace(',', '.'));
-    if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) {
-      try {
-        setGeocodingLoading(true);
-        const geo = await searchAddressCoordinates(newObjAddress);
-        parsedLat = geo.lat;
-        parsedLng = geo.lng;
-        setNewObjLat(geo.lat.toFixed(5));
-        setNewObjLng(geo.lng.toFixed(5));
-      } catch (err) {
-        setGeocodingStatus({
-          type: 'error',
-          text: err instanceof Error ? err.message : t('createTask.coordsErrFail'),
-        });
-        return;
-      } finally {
-        setGeocodingLoading(false);
-      }
+    let coords: { lat: number; lng: number };
+    try {
+      setGeocodingLoading(true);
+      coords = await resolveCoordsForAddress(
+        newObjAddress,
+        newObjLat,
+        newObjLng,
+        newObjGeocodedFor
+      );
+      setNewObjLat(coords.lat.toFixed(5));
+      setNewObjLng(coords.lng.toFixed(5));
+      setNewObjGeocodedFor(newObjAddress.trim().toLowerCase());
+    } catch (err) {
+      setGeocodingStatus({
+        type: 'error',
+        text: err instanceof Error ? err.message : t('createTask.coordsErrFail'),
+      });
+      return;
+    } finally {
+      setGeocodingLoading(false);
     }
 
     const clientUser = users.find((u) => u.role === 'client_hausverwaltung');
@@ -179,18 +221,19 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       const created = await onCreateObject({
         name: newObjName.trim(),
         address: newObjAddress.trim(),
-        lat: parsedLat,
-        lng: parsedLng,
+        lat: coords.lat,
+        lng: coords.lng,
         client_id: clientUser?.id ?? '',
         client_name: clientUser?.region || '',
         units_count: 16,
       });
       setObjectId(created.id);
-      setShowNewObjectForm(false);
+      setAddressMode('existing');
       setNewObjName('');
       setNewObjAddress('');
       setNewObjLat('');
       setNewObjLng('');
+      setNewObjGeocodedFor('');
       setGeocodingStatus(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Objekt nije spremljen na server.';
@@ -204,10 +247,21 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const handlePhotoAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const fallbackManualCoords =
+      addressMode === 'manual'
+        ? parseCoords(manualLat, manualLng)
+        : addressMode === 'newObject'
+        ? parseCoords(newObjLat, newObjLng)
+        : null;
     const watermarked = await createWatermarkedPhoto(file, {
-      objectName: selectedObject?.name ?? t('common.object'),
-      fallbackLat: selectedObject?.lat,
-      fallbackLng: selectedObject?.lng,
+      objectName:
+        addressMode === 'existing'
+          ? selectedObject?.name ?? t('common.object')
+          : newObjName.trim() || manualAddress.trim() || newObjAddress.trim() || t('common.object'),
+      fallbackLat:
+        addressMode === 'existing' ? selectedObject?.lat : fallbackManualCoords?.lat,
+      fallbackLng:
+        addressMode === 'existing' ? selectedObject?.lng : fallbackManualCoords?.lng,
     });
     setPhotos((prev) => [...prev, watermarked]);
     e.target.value = '';
@@ -236,11 +290,25 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError(null);
-    if (!title.trim() || !objectId) return;
+    if (!title.trim()) return;
     if (category === 'Mülltonnendienst' && selectedBinTypes.length === 0) {
       setBinValidationError(true);
       return;
     }
+
+    if (addressMode === 'existing' && !objectId) {
+      setModalError(t('createTask.addrRequired'));
+      return;
+    }
+    if (addressMode === 'manual' && !manualAddress.trim()) {
+      setModalError(t('createTask.addrRequired'));
+      return;
+    }
+    if (addressMode === 'newObject' && !newObjAddress.trim()) {
+      setModalError(t('createTask.addrRequired'));
+      return;
+    }
+
     setSubmitting(true);
     try {
       const checklist: ChecklistItem[] = DEFAULT_CHECKLISTS[category].map((label, idx) => ({
@@ -248,20 +316,118 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         label,
         checked: false,
       }));
-      await onCreateTask({
+
+      let finalObjectId = addressMode === 'existing' ? objectId : '';
+      let taskAddress: string | undefined;
+      let taskLat: number | undefined;
+      let taskLng: number | undefined;
+
+      if (addressMode === 'existing') {
+        const obj = objects.find((o) => o.id === objectId);
+        if (obj) {
+          taskAddress = obj.address;
+          taskLat = obj.lat;
+          taskLng = obj.lng;
+        }
+      } else if (addressMode === 'manual') {
+        const cleanAddr = manualAddress.trim();
+        const coords = await resolveCoordsForAddress(
+          cleanAddr,
+          manualLat,
+          manualLng,
+          manualGeocodedFor
+        );
+        setManualLat(coords.lat.toFixed(5));
+        setManualLng(coords.lng.toFixed(5));
+        setManualGeocodedFor(cleanAddr.toLowerCase());
+        taskAddress = cleanAddr;
+        taskLat = coords.lat;
+        taskLng = coords.lng;
+
+        const matchingObj = objects.find(
+          (o) => o.address.trim().toLowerCase() === cleanAddr.toLowerCase()
+        );
+        if (matchingObj) {
+          finalObjectId = matchingObj.id;
+        }
+      } else if (addressMode === 'newObject') {
+        const cleanAddr = newObjAddress.trim();
+        const coords = await resolveCoordsForAddress(
+          cleanAddr,
+          newObjLat,
+          newObjLng,
+          newObjGeocodedFor
+        );
+        setNewObjLat(coords.lat.toFixed(5));
+        setNewObjLng(coords.lng.toFixed(5));
+        setNewObjGeocodedFor(cleanAddr.toLowerCase());
+
+        const clientUser = users.find((u) => u.role === 'client_hausverwaltung');
+        const createdObj = await onCreateObject({
+          name: newObjName.trim() || cleanAddr,
+          address: cleanAddr,
+          lat: coords.lat,
+          lng: coords.lng,
+          client_id: clientUser?.id ?? '',
+          client_name: clientUser?.region || '',
+          units_count: 16,
+        });
+        finalObjectId = createdObj.id;
+        taskAddress = createdObj.address;
+        taskLat = createdObj.lat;
+        taskLng = createdObj.lng;
+      }
+
+      const taskPayload: Omit<FacilityTask, 'id' | 'created_at'> = {
         title: title.trim(),
         description: description.trim(),
         category,
         status: 'offen',
         priority,
         due_date: `${dueDate}T${dueTime}`,
-        object_id: objectId,
+        object_id: finalObjectId,
         assigned_to: assignedTo,
         checklist_json: checklist,
         notes: '',
         photos,
         bin_types: category === 'Mülltonnendienst' ? selectedBinTypes : undefined,
-      });
+        address: taskAddress,
+        lat: taskLat,
+        lng: taskLng,
+      };
+
+      try {
+        await onCreateTask(taskPayload);
+      } catch (taskErr) {
+        const msg = taskErr instanceof Error ? taskErr.message.toLowerCase() : '';
+        // If PocketBase schema requires object_id on tasks, auto-create & link a PropertyObject with the geocoded coordinates
+        if (
+          addressMode === 'manual' &&
+          !finalObjectId &&
+          taskAddress &&
+          typeof taskLat === 'number' &&
+          typeof taskLng === 'number' &&
+          (msg.includes('object_id') || msg.includes('cannot be blank') || msg.includes('failed to create'))
+        ) {
+          const clientUser = users.find((u) => u.role === 'client_hausverwaltung');
+          const createdObj = await onCreateObject({
+            name: title.trim() || taskAddress,
+            address: taskAddress,
+            lat: taskLat,
+            lng: taskLng,
+            client_id: clientUser?.id ?? '',
+            client_name: clientUser?.region || '',
+            units_count: 1,
+          });
+          await onCreateTask({
+            ...taskPayload,
+            object_id: createdObj.id,
+          });
+        } else {
+          throw taskErr;
+        }
+      }
+
       onClose();
     } catch (err) {
       setModalError(
@@ -388,26 +554,69 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             />
           </div>
 
-          {/* Adresse / Objekt + Neues Objekt anlegen */}
+          {/* Adresse / Objekt + Manuelle Adresse + Neues Objekt anlegen */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
               <label
                 htmlFor="new-task-object"
                 className="text-xs font-semibold text-slate-600 dark:text-slate-300"
               >
                 {t('createTask.objectLabel')}
               </label>
-              <button
-                type="button"
-                onClick={() => setShowNewObjectForm((prev) => !prev)}
-                className="flex items-center gap-1 text-xs font-semibold text-orange-600 dark:text-orange-400 hover:underline cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                {showNewObjectForm ? t('createTask.useSelection') : t('createTask.newObject')}
-              </button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {objects.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddressMode('existing');
+                      setGeocodingStatus(null);
+                      setModalError(null);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                      addressMode === 'existing'
+                        ? 'bg-slate-900 text-white dark:bg-orange-500'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {t('createTask.useSelection')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddressMode('manual');
+                    setGeocodingStatus(null);
+                    setModalError(null);
+                  }}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                    addressMode === 'manual'
+                      ? 'bg-slate-900 text-white dark:bg-orange-500'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <MapPin className="w-3 h-3" />
+                  <span>{t('createTask.manualAddress')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddressMode('newObject');
+                    setGeocodingStatus(null);
+                    setModalError(null);
+                  }}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                    addressMode === 'newObject'
+                      ? 'bg-slate-900 text-white dark:bg-orange-500'
+                      : 'bg-slate-100 dark:bg-slate-800 text-orange-600 dark:text-orange-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>{t('createTask.newObject')}</span>
+                </button>
+              </div>
             </div>
 
-            {!showNewObjectForm ? (
+            {addressMode === 'existing' && (
               <select
                 id="new-task-object"
                 value={objectId}
@@ -420,7 +629,90 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   </option>
                 ))}
               </select>
-            ) : (
+            )}
+
+            {addressMode === 'manual' && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-3.5 space-y-2.5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  {t('createTask.objAddrLabel')}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={manualAddress}
+                    onChange={(e) => {
+                      setManualAddress(e.target.value);
+                      if (e.target.value.trim().toLowerCase() !== manualGeocodedFor) {
+                        setManualLat('');
+                        setManualLng('');
+                      }
+                    }}
+                    placeholder={t('createTask.objAddrPlaceholder')}
+                    className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-orange-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleGeocode('manual')}
+                    disabled={geocodingLoading || !manualAddress.trim()}
+                    className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-orange-500 hover:bg-slate-800 dark:hover:bg-orange-600 disabled:opacity-50 px-3 py-2 text-xs font-semibold text-white whitespace-nowrap cursor-pointer"
+                  >
+                    {geocodingLoading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Search className="w-3.5 h-3.5" />
+                    )}
+                    <span>{t('createTask.findCoords')}</span>
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {t('createTask.manualAddrHint')}
+                </p>
+
+                {geocodingStatus && (
+                  <p
+                    className={`text-xs font-medium flex items-center gap-1 ${
+                      geocodingStatus.type === 'success'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-red-600 dark:text-red-400'
+                    }`}
+                  >
+                    {geocodingStatus.type === 'success' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                    {geocodingStatus.text}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {t('createTask.lat')}
+                    </label>
+                    <input
+                      type="text"
+                      value={manualLat}
+                      onChange={(e) => setManualLat(e.target.value)}
+                      placeholder="auto"
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {t('createTask.lng')}
+                    </label>
+                    <input
+                      type="text"
+                      value={manualLng}
+                      onChange={(e) => setManualLng(e.target.value)}
+                      placeholder="auto"
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {addressMode === 'newObject' && (
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-3.5 space-y-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
@@ -441,16 +733,23 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   <div className="flex gap-2">
                     <input
                       type="text"
+                      required
                       value={newObjAddress}
-                      onChange={(e) => setNewObjAddress(e.target.value)}
+                      onChange={(e) => {
+                        setNewObjAddress(e.target.value);
+                        if (e.target.value.trim().toLowerCase() !== newObjGeocodedFor) {
+                          setNewObjLat('');
+                          setNewObjLng('');
+                        }
+                      }}
                       placeholder={t('createTask.objAddrPlaceholder')}
                       className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white"
                     />
                     <button
                       type="button"
-                      onClick={handleGeocode}
-                      disabled={geocodingLoading}
-                      className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-orange-500 hover:bg-slate-800 dark:hover:bg-orange-600 px-3 py-2 text-xs font-semibold text-white whitespace-nowrap cursor-pointer"
+                      onClick={() => void handleGeocode('newObject')}
+                      disabled={geocodingLoading || !newObjAddress.trim()}
+                      className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-orange-500 hover:bg-slate-800 dark:hover:bg-orange-600 disabled:opacity-50 px-3 py-2 text-xs font-semibold text-white whitespace-nowrap cursor-pointer"
                     >
                       {geocodingLoading ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -484,6 +783,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                       type="text"
                       value={newObjLat}
                       onChange={(e) => setNewObjLat(e.target.value)}
+                      placeholder="auto"
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
                     />
                   </div>
@@ -495,6 +795,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                       type="text"
                       value={newObjLng}
                       onChange={(e) => setNewObjLng(e.target.value)}
+                      placeholder="auto"
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
                     />
                   </div>
@@ -668,6 +969,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               disabled={
                 submitting ||
                 !title.trim() ||
+                (addressMode === 'existing' && !objectId) ||
+                (addressMode === 'manual' && !manualAddress.trim()) ||
+                (addressMode === 'newObject' && !newObjAddress.trim()) ||
                 (category === 'Mülltonnendienst' && selectedBinTypes.length === 0)
               }
               className="rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-5 py-2.5 text-sm font-semibold text-white transition-colors cursor-pointer"

@@ -337,7 +337,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                       {task.title}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">
-                      {obj?.name ?? t('common.object')}
+                      {obj?.name ?? (task.address || t('common.object'))}
                     </p>
                     {task.bin_types && task.bin_types.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1">

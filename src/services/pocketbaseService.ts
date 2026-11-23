@@ -214,11 +214,21 @@ async function pbRequest<T>(path: string, init?: RequestInit): Promise<T | null>
 }
 
 function normalizeTaskRecord(task: FacilityTask): FacilityTask {
+  const rawLat = typeof task.lat === 'number' ? task.lat : Number(task.lat);
+  const rawLng = typeof task.lng === 'number' ? task.lng : Number(task.lng);
+  const hasCoords =
+    Number.isFinite(rawLat) &&
+    Number.isFinite(rawLng) &&
+    !(rawLat === 0 && rawLng === 0);
+
   return {
     ...task,
     checklist_json: Array.isArray(task.checklist_json) ? task.checklist_json : [],
     photos: Array.isArray(task.photos) ? task.photos : [],
     bin_types: normalizeBinTypes(task.bin_types),
+    address: typeof task.address === 'string' && task.address.trim() ? task.address.trim() : undefined,
+    lat: hasCoords ? rawLat : undefined,
+    lng: hasCoords ? rawLng : undefined,
     notes: typeof task.notes === 'string' ? task.notes : '',
     description: typeof task.description === 'string' ? task.description : '',
   };
@@ -1484,6 +1494,19 @@ export const pocketbaseService = {
       };
       if (input.bin_types && input.bin_types.length > 0) {
         pbPayload.bin_types = input.bin_types;
+      }
+      if (input.address && input.address.trim()) {
+        pbPayload.address = input.address.trim();
+      }
+      if (
+        typeof input.lat === 'number' &&
+        typeof input.lng === 'number' &&
+        Number.isFinite(input.lat) &&
+        Number.isFinite(input.lng) &&
+        !(input.lat === 0 && input.lng === 0)
+      ) {
+        pbPayload.lat = input.lat;
+        pbPayload.lng = input.lng;
       }
       const remoteCreated = await pbRequest<FacilityTask>(
         `/api/collections/${pocketbaseConfig.collections.tasks}/records`,

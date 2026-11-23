@@ -65,6 +65,9 @@ export interface FacilityTask {
   notes: string;
   photos: TaskPhoto[];
   bin_types?: BinType[];
+  address?: string;
+  lat?: number;
+  lng?: number;
   signature?: string; // base64 PNG dataUrl
   completed_at?: string;
 }
