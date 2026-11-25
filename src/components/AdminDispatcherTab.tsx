@@ -17,6 +17,7 @@ import {
 import { formatDateTimeDE, formatTimeDE, getTodayISODate, isTaskOverdue } from '../utils/dateUtils';
 import { exportTasksReportPDF } from '../utils/pdfExport';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useTaskTranslation } from '../i18n/TaskTranslationContext';
 import { DOC_LANGUAGE_OPTIONS, PDF_LABELS } from '../i18n/translations';
 
 interface AdminDispatcherTabProps {
@@ -36,7 +37,8 @@ export const AdminDispatcherTab: React.FC<AdminDispatcherTabProps> = ({
   onAssignTask,
   onOpenTaskDetail,
 }) => {
-  const { t, tCategory, tStatus, docLanguage, setDocLanguage } = useTranslation();
+  const { t, tCategory, tStatus, docLanguage, setDocLanguage, language } = useTranslation();
+  const { getTaskTitle, ensureTaskTranslated } = useTaskTranslation();
   const [filterWorker, setFilterWorker] = useState<string>('alle');
   const todayStr = getTodayISODate();
 
@@ -70,9 +72,12 @@ export const AdminDispatcherTab: React.FC<AdminDispatcherTabProps> = ({
 
         <button
           type="button"
-          onClick={() =>
+          onClick={async () => {
+            const translatedTasks = await Promise.all(
+              filteredTasks.map((item) => ensureTaskTranslated(item, language))
+            );
             exportTasksReportPDF({
-              tasks: filteredTasks,
+              tasks: translatedTasks,
               objects,
               users,
               docLang: docLanguage,
@@ -84,8 +89,8 @@ export const AdminDispatcherTab: React.FC<AdminDispatcherTabProps> = ({
                   : `${
                       docLanguage === 'DE' ? 'Auswertung Mitarbeiter' : PDF_LABELS[docLanguage].colWorker
                     }: ${users.find((u) => u.id === filterWorker)?.name ?? ''}`,
-            })
-          }
+            });
+          }}
           className="flex items-center gap-2 rounded-xl bg-slate-900 dark:bg-orange-500 hover:bg-slate-800 dark:hover:bg-orange-600 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white transition-colors cursor-pointer min-h-[44px]"
         >
           <FileDown className="w-4 h-4" />
@@ -257,7 +262,7 @@ export const AdminDispatcherTab: React.FC<AdminDispatcherTabProps> = ({
                         className="text-left hover:text-orange-600 dark:hover:text-orange-400 cursor-pointer"
                       >
                         <p className="font-semibold text-slate-900 dark:text-white">
-                          {task.title}
+                          {getTaskTitle(task)}
                         </p>
                         <p className="text-xs text-slate-500 dark:text-slate-400">
                           {obj?.name ?? '—'}
@@ -298,7 +303,7 @@ export const AdminDispatcherTab: React.FC<AdminDispatcherTabProps> = ({
                       <select
                         value={task.assigned_to}
                         onChange={(e) => onAssignTask(task.id, e.target.value)}
-                        aria-label={`Mitarbeiter für ${task.title} zuweisen`}
+                        aria-label={`Mitarbeiter für ${getTaskTitle(task)} zuweisen`}
                         className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-800 dark:text-slate-100"
                       >
                         {fieldWorkers.map((w) => (

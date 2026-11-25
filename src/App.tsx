@@ -21,6 +21,7 @@ import { UebergabeModule } from './components/modules/UebergabeModule';
 import { WinterdienstModule } from './components/modules/WinterdienstModule';
 import { ZaehlerstandModule } from './components/modules/ZaehlerstandModule';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
+import { TaskTranslationProvider } from './i18n/TaskTranslationContext';
 import { pb, pocketbaseService } from './services/pocketbaseService';
 import {
   ActiveTab,
@@ -433,6 +434,7 @@ export default function App() {
       onChangeLanguage={handleChangeLanguage}
       onChangeDocLanguage={handleChangeDocLanguage}
     >
+      <TaskTranslationProvider tasks={tasks}>
       {apiError && (
         <div
           role="alert"
@@ -514,6 +516,9 @@ export default function App() {
                 users={users}
                 onOpenTaskDetail={(task) => setSelectedTaskId(task.id)}
                 onQuickCompleteWithPhoto={handleQuickCompleteWithPhoto}
+                onCompleteWithoutPhoto={(task) =>
+                  handleUpdateTask(task.id, { status: 'erledigt' })
+                }
               />
             )}
 
@@ -680,6 +685,7 @@ export default function App() {
       )}
         </div>
       )}
+      </TaskTranslationProvider>
     </LanguageProvider>
   );
 }

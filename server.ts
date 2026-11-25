@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import express from 'express';
 import type { Request, Response } from 'express';
@@ -124,6 +125,42 @@ function verifySessionToken(token: string): SessionPayload | null {
   } catch {
     return null;
   }
+}
+
+const TARGET_LANGUAGE_NAMES: Record<string, string> = {
+  DE: 'German (Deutsch)',
+  EN: 'English',
+  HR: 'Croatian (Hrvatski)',
+  SQ: 'Albanian (Shqip)',
+  PL: 'Polish (Polski)',
+  TR: 'Turkish (Türkçe)',
+  RU: 'Russian (Русский)',
+};
+
+const MAX_TRANSLATION_CACHE_SIZE = 2000;
+const serverTranslationCache = new Map<string, string>();
+
+function setServerCache(key: string, value: string): void {
+  if (serverTranslationCache.size >= MAX_TRANSLATION_CACHE_SIZE) {
+    const oldestKey = serverTranslationCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      serverTranslationCache.delete(oldestKey);
+    }
+  }
+  serverTranslationCache.set(key, value);
+}
+
+function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) return null;
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
 }
 
 async function startServer(): Promise<void> {
@@ -263,6 +300,109 @@ async function startServer(): Promise<void> {
         role: session.role,
       },
     });
+  });
+
+  app.post('/api/translate/tasks', async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const rawLang = typeof body.targetLanguage === 'string' ? body.targetLanguage.trim().toUpperCase() : '';
+    const targetLanguageName = TARGET_LANGUAGE_NAMES[rawLang];
+    if (!targetLanguageName) {
+      res.status(400).json({ error: 'UNSUPPORTED_TARGET_LANGUAGE' });
+      return;
+    }
+
+    const rawTexts = Array.isArray(body.texts) ? body.texts : [];
+    const uniqueTexts: string[] = [];
+    const seen = new Set<string>();
+    for (const item of rawTexts) {
+      if (typeof item !== 'string') continue;
+      const trimmed = item.trim();
+      if (!trimmed || trimmed.length > 2000 || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      uniqueTexts.push(trimmed);
+      if (uniqueTexts.length >= 40) break;
+    }
+
+    if (uniqueTexts.length === 0) {
+      res.json({ translations: {} });
+      return;
+    }
+
+    const translations: Record<string, string> = {};
+    const pending: Array<{ index: number; text: string }> = [];
+
+    for (const text of uniqueTexts) {
+      const cacheKey = `${rawLang}::${text}`;
+      const cached = serverTranslationCache.get(cacheKey);
+      if (cached !== undefined) {
+        translations[text] = cached;
+      } else {
+        pending.push({ index: pending.length, text });
+      }
+    }
+
+    if (pending.length === 0) {
+      res.json({ translations });
+      return;
+    }
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      res.status(503).json({ error: 'GEMINI_API_KEY_NOT_CONFIGURED' });
+      return;
+    }
+
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: JSON.stringify(pending),
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          systemInstruction:
+            `You are a precise translator for a German/European property management and facility maintenance (Hausmeister) application. ` +
+            `Translate each input "text" from whatever language it is written in (e.g. Croatian, Serbian, Bosnian, German, English, Albanian, Polish, Turkish, Russian) into ${targetLanguageName}. ` +
+            `If an input string is already clearly written in ${targetLanguageName}, return it unchanged. ` +
+            `Preserve street names, building names, unit numbers, access codes, measurements, and numbers intact. ` +
+            `Keep translations concise, natural, and accurate for work orders.`,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                index: { type: Type.INTEGER },
+                translated: { type: Type.STRING },
+              },
+              required: ['index', 'translated'],
+            },
+          },
+        },
+      });
+
+      const rawJson = (response.text ?? '[]').trim();
+      const parsed = JSON.parse(rawJson) as Array<{ index?: number; translated?: string }>;
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item.index !== 'number' || typeof item.translated !== 'string') continue;
+          const orig = pending[item.index];
+          if (!orig) continue;
+          const cleanTranslated = item.translated.trim() || orig.text;
+          translations[orig.text] = cleanTranslated;
+          setServerCache(`${rawLang}::${orig.text}`, cleanTranslated);
+        }
+      }
+
+      for (const orig of pending) {
+        if (translations[orig.text] === undefined) {
+          translations[orig.text] = orig.text;
+        }
+      }
+
+      res.json({ translations });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'TRANSLATION_FAILED';
+      res.status(502).json({ error: msg });
+    }
   });
 
   if (process.env.NODE_ENV !== 'production') {

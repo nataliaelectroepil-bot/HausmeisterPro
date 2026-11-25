@@ -292,7 +292,11 @@ export function exportTasksReportPDF({
     const catText = CATEGORY_LABELS[task.category]?.[docLang] ?? task.category;
 
     doc.setTextColor(15, 23, 42);
-    doc.text(safePdfText(task.title.slice(0, 34), docLang), 17, y + 4.5);
+    const titlePrepared = prepareSmartText(doc, task.title.slice(0, 34), 62, 8.5, 'normal');
+    renderSmartLines(doc, titlePrepared, 17, y + 4.5, 62, 8.5, 'normal', [15, 23, 42], 4.2);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(15, 23, 42);
     doc.text(safePdfText((obj?.name ?? '—').slice(0, 30), docLang), 82, y + 4.5);
     doc.text(safePdfText(catText.slice(0, 22), docLang), 142, y + 4.5);
     doc.text(formatDateDE(task.due_date), 184, y + 4.5);
@@ -549,59 +553,89 @@ export function exportHandoverProtocolPDF({
   doc.text(safePdfText(L.sec1Rooms, docLang), 16, y);
   y += 5;
 
-  doc.setFillColor(30, 41, 59);
-  doc.rect(16, y, pageWidth - 32, 8, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(9);
-  doc.text(safePdfText(L.colRoom, docLang), 20, y + 5.5);
-  doc.text(safePdfText(L.colCondition, docLang), 72, y + 5.5);
-  doc.text(safePdfText(L.colFindings, docLang), 112, y + 5.5);
+  const drawRoomsTableHeader = (startY: number) => {
+    doc.setFillColor(30, 41, 59);
+    doc.rect(16, startY, pageWidth - 32, 8, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(safePdfText(L.colRoom, docLang), 20, startY + 5.5);
+    doc.text(safePdfText(L.colCondition, docLang), 72, startY + 5.5);
+    doc.text(safePdfText(L.colFindings, docLang), 112, startY + 5.5);
+  };
+
+  drawRoomsTableHeader(y);
   y += 9;
 
-  doc.setFont('helvetica', 'normal');
+  const getRoomCondLabel = (cond: 'Einwandfrei' | 'Mängel vorhanden') =>
+    cond === 'Mängel vorhanden'
+      ? docLang === 'EN'
+        ? 'Defects Found'
+        : docLang === 'HR'
+          ? 'Nedostaci'
+          : docLang === 'SQ'
+            ? 'Ka mangësi'
+            : 'Mängel vorhanden'
+      : docLang === 'EN'
+        ? 'Good Condition'
+        : docLang === 'HR'
+          ? 'Ispravno'
+          : docLang === 'SQ'
+            ? 'Pa të meta'
+            : 'Einwandfrei';
+
+  const photoTagSuffix = docLang === 'EN' ? ' [Photo attached]' : ' [Foto beigefügt]';
+
   protocol.rooms_json.forEach((r, idx) => {
-    if (y > 260) {
+    const roomName = ROOM_LABELS[r.room]?.[docLang] ?? r.room;
+    const condLabel = getRoomCondLabel(r.condition);
+    const notesBase = r.notes?.trim() || L.noDefects;
+    const notesDisplay = r.photo?.dataUrl ? `${notesBase}${photoTagSuffix}` : notesBase;
+
+    const preparedRoom = prepareSmartText(doc, roomName, 48, 9, 'bold');
+    const preparedCond = prepareSmartText(doc, condLabel, 36, 9, 'normal');
+    const preparedNotes = prepareSmartText(doc, notesDisplay, pageWidth - 16 - 112 - 2, 9, 'normal');
+
+    const lineCount = Math.max(
+      preparedRoom.lines.length,
+      preparedCond.lines.length,
+      preparedNotes.lines.length
+    );
+    const rowHeight = Math.max(10, lineCount * 4.4 + 4.5);
+
+    if (y + rowHeight > 274) {
       doc.addPage();
       y = 20;
+      drawRoomsTableHeader(y);
+      y += 9;
     }
+
     if (idx % 2 === 0) {
       doc.setFillColor(248, 250, 252);
-      doc.rect(16, y - 1, pageWidth - 32, 10, 'F');
+      doc.rect(16, y - 1, pageWidth - 32, rowHeight, 'F');
     }
-    const roomName = ROOM_LABELS[r.room]?.[docLang] ?? r.room;
-    const condLabel =
-      r.condition === 'Mängel vorhanden'
-        ? docLang === 'EN'
-          ? 'Defects Found'
-          : docLang === 'HR'
-            ? 'Nedostaci'
-            : docLang === 'SQ'
-              ? 'Ka mangësi'
-              : 'Mängel vorhanden'
-        : docLang === 'EN'
-          ? 'Good Condition'
-          : docLang === 'HR'
-            ? 'Ispravno'
-            : docLang === 'SQ'
-              ? 'Pa të meta'
-              : 'Einwandfrei';
 
-    doc.setTextColor(15, 23, 42);
-    doc.setFont('helvetica', 'bold');
-    doc.text(safePdfText(roomName, docLang), 20, y + 5);
-    doc.setFont('helvetica', 'normal');
-    if (r.condition === 'Mängel vorhanden') {
-      doc.setTextColor(220, 38, 38);
-    } else {
-      doc.setTextColor(22, 163, 74);
-    }
-    doc.text(safePdfText(condLabel, docLang), 72, y + 5);
-    doc.setTextColor(51, 65, 85);
-    doc.text(safePdfText((r.notes || L.noDefects).slice(0, 48), docLang), 112, y + 5);
+    renderSmartLines(doc, preparedRoom, 20, y + 4.5, 48, 9, 'bold', [15, 23, 42], 4.4);
+
+    const condColor: [number, number, number] =
+      r.condition === 'Mängel vorhanden' ? [220, 38, 38] : [22, 163, 74];
+    renderSmartLines(doc, preparedCond, 72, y + 4.5, 36, 9, 'normal', condColor, 4.4);
+
+    renderSmartLines(
+      doc,
+      preparedNotes,
+      112,
+      y + 4.5,
+      pageWidth - 16 - 112 - 2,
+      9,
+      'normal',
+      [51, 65, 85],
+      4.4
+    );
 
     doc.setDrawColor(226, 232, 240);
-    doc.line(16, y + 8.5, pageWidth - 16, y + 8.5);
-    y += 10;
+    doc.line(16, y + rowHeight - 1.5, pageWidth - 16, y + rowHeight - 1.5);
+    y += rowHeight;
   });
 
   // Page 2: Schlüssel, Zählerstände & Doppelte Unterschrift
@@ -689,8 +723,106 @@ export function exportHandoverProtocolPDF({
   doc.text(safePdfText(`${L.sigLandlordLbl} (${protocol.landlord_name})`, docLang), 16, y + 32);
   doc.text(safePdfText(`${L.sigTenantLbl} (${protocol.tenant_name})`, docLang), 114, y + 32);
 
+  // Page 3+: Room Photo Documentation (all compressed photos from default + newly added rooms)
+  const roomsWithPhotos = protocol.rooms_json.filter((r) => Boolean(r.photo?.dataUrl));
+  if (roomsWithPhotos.length > 0) {
+    doc.addPage();
+    drawBrandHeader(
+      doc,
+      L.secRoomsPhotos,
+      `${L.unit}: ${protocol.apartment}`,
+      `${L.date}: ${formatDateDE(protocol.created_at)}`,
+      docLang
+    );
+
+    let photoY = 44;
+    const imgWidth = 84;
+    const imgHeight = 54;
+    const colGap = 10;
+
+    for (let i = 0; i < roomsWithPhotos.length; i += 2) {
+      if (photoY + imgHeight + 22 > 282) {
+        doc.addPage();
+        photoY = 20;
+      }
+
+      for (let col = 0; col < 2; col++) {
+        const roomItem = roomsWithPhotos[i + col];
+        if (!roomItem?.photo?.dataUrl) continue;
+
+        const x = 16 + col * (imgWidth + colGap);
+        const roomName = ROOM_LABELS[roomItem.room]?.[docLang] ?? roomItem.room;
+        const condLabel = getRoomCondLabel(roomItem.condition);
+
+        const titlePrepared = prepareSmartText(
+          doc,
+          `${roomName} (${condLabel})`,
+          imgWidth,
+          9,
+          'bold'
+        );
+        renderSmartLines(
+          doc,
+          titlePrepared,
+          x,
+          photoY,
+          imgWidth,
+          9,
+          'bold',
+          roomItem.condition === 'Mängel vorhanden' ? [220, 38, 38] : [15, 23, 42],
+          4.2
+        );
+
+        const imgTopY = photoY + 3.5;
+        const fmt = roomItem.photo.dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+        try {
+          doc.addImage(roomItem.photo.dataUrl, fmt, x, imgTopY, imgWidth, imgHeight);
+        } catch {
+          doc.setDrawColor(203, 213, 225);
+          doc.rect(x, imgTopY, imgWidth, imgHeight);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor(100, 116, 139);
+          doc.text(safePdfText(L.photoEmbedErr, docLang), x + 3, imgTopY + imgHeight / 2);
+        }
+
+        const metaText =
+          typeof roomItem.photo.lat === 'number' && typeof roomItem.photo.lng === 'number'
+            ? `${formatDateTimeDE(roomItem.photo.timestamp)} | ${roomItem.photo.lat.toFixed(5)}, ${roomItem.photo.lng.toFixed(5)}`
+            : formatDateTimeDE(roomItem.photo.timestamp);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(71, 85, 105);
+        doc.text(safePdfText(metaText, docLang), x, imgTopY + imgHeight + 4.5);
+
+        if (roomItem.notes?.trim()) {
+          const notePrepared = prepareSmartText(
+            doc,
+            roomItem.notes.trim(),
+            imgWidth,
+            8,
+            'normal'
+          );
+          renderSmartLines(
+            doc,
+            { ...notePrepared, lines: notePrepared.lines.slice(0, 2) },
+            x,
+            imgTopY + imgHeight + 9.5,
+            imgWidth,
+            8,
+            'normal',
+            [51, 65, 85],
+            3.8
+          );
+        }
+      }
+
+      photoY += imgHeight + 24;
+    }
+  }
+
   doc.save(
-    `Uebergabeprotokoll_${protocol.type}_${protocol.apartment.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
+    `Uebergabeprotokoll_${protocol.type}_${protocol.apartment.replace(/[^\p{L}\p{N}_-]+/gu, '_')}.pdf`
   );
 }
 
@@ -906,6 +1038,132 @@ function sanitizeHelveticaText(input: string): string {
     .replace(/Ş/g, 'S')
     .replace(/ı/g, 'i')
     .replace(/İ/g, 'I');
+}
+
+const NON_LATIN1_RE = /[^\u0000-\u00FF]/;
+const PDF_PX_PER_MM = 3.779527559 * 3;
+
+interface PreparedSmartText {
+  isUnicode: boolean;
+  lines: string[];
+}
+
+function getSmartFontCss(fontSizePx: number, fontStyle: 'normal' | 'bold' | 'italic'): string {
+  const weight = fontStyle === 'bold' ? '700' : fontStyle === 'italic' ? 'italic 400' : '400';
+  return `${weight} ${fontSizePx}px "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
+}
+
+function wrapCanvasTextLines(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidthPx: number
+): string[] {
+  const paragraphs = text.split(/\r?\n/);
+  const lines: string[] = [];
+  for (const para of paragraphs) {
+    if (!para.trim()) {
+      lines.push('');
+      continue;
+    }
+    const words = para.split(/\s+/);
+    let current = '';
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (ctx.measureText(candidate).width <= maxWidthPx || !current) {
+        current = candidate;
+      } else {
+        lines.push(current);
+        current = word;
+      }
+    }
+    if (current) lines.push(current);
+  }
+  return lines.length > 0 ? lines : [''];
+}
+
+function prepareSmartText(
+  doc: jsPDF,
+  text: string,
+  maxWidthMm: number,
+  fontSizePt: number,
+  fontStyle: 'normal' | 'bold' | 'italic'
+): PreparedSmartText {
+  if (!NON_LATIN1_RE.test(text) || typeof document === 'undefined') {
+    doc.setFont('helvetica', fontStyle);
+    doc.setFontSize(fontSizePt);
+    const asciiLines = doc.splitTextToSize(sanitizeHelveticaText(text), maxWidthMm) as string[];
+    return { isUnicode: false, lines: asciiLines.length > 0 ? asciiLines : [''] };
+  }
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    doc.setFont('helvetica', fontStyle);
+    doc.setFontSize(fontSizePt);
+    return { isUnicode: false, lines: doc.splitTextToSize(text, maxWidthMm) as string[] };
+  }
+
+  const fontSizeMm = (fontSizePt * 25.4) / 72;
+  const fontSizePx = fontSizeMm * PDF_PX_PER_MM;
+  ctx.font = getSmartFontCss(fontSizePx, fontStyle);
+  const lines = wrapCanvasTextLines(ctx, text, maxWidthMm * PDF_PX_PER_MM);
+  return { isUnicode: true, lines };
+}
+
+function renderSmartLines(
+  doc: jsPDF,
+  prepared: PreparedSmartText,
+  xMm: number,
+  baselineYMm: number,
+  maxWidthMm: number,
+  fontSizePt: number,
+  fontStyle: 'normal' | 'bold' | 'italic',
+  colorRgb: [number, number, number],
+  lineHeightMm: number
+): void {
+  if (!prepared.isUnicode || typeof document === 'undefined') {
+    doc.setFont('helvetica', fontStyle);
+    doc.setFontSize(fontSizePt);
+    doc.setTextColor(colorRgb[0], colorRgb[1], colorRgb[2]);
+    doc.text(prepared.lines, xMm, baselineYMm);
+    return;
+  }
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    doc.setFont('helvetica', fontStyle);
+    doc.setFontSize(fontSizePt);
+    doc.setTextColor(colorRgb[0], colorRgb[1], colorRgb[2]);
+    doc.text(prepared.lines, xMm, baselineYMm);
+    return;
+  }
+
+  const fontSizeMm = (fontSizePt * 25.4) / 72;
+  const fontSizePx = fontSizeMm * PDF_PX_PER_MM;
+  const lineHeightPx = lineHeightMm * PDF_PX_PER_MM;
+  const widthPx = Math.max(1, Math.ceil(maxWidthMm * PDF_PX_PER_MM));
+  const baselineOffsetPx = fontSizePx * 0.9;
+  const heightPx = Math.max(
+    1,
+    Math.ceil((prepared.lines.length - 1) * lineHeightPx + fontSizePx * 1.25)
+  );
+
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+
+  ctx.clearRect(0, 0, widthPx, heightPx);
+  ctx.font = getSmartFontCss(fontSizePx, fontStyle);
+  ctx.fillStyle = `rgb(${colorRgb[0]}, ${colorRgb[1]}, ${colorRgb[2]})`;
+  ctx.textBaseline = 'alphabetic';
+
+  prepared.lines.forEach((line, idx) => {
+    ctx.fillText(line, 0, baselineOffsetPx + idx * lineHeightPx);
+  });
+
+  const dataUrl = canvas.toDataURL('image/png');
+  const heightMm = heightPx / PDF_PX_PER_MM;
+  doc.addImage(dataUrl, 'PNG', xMm, baselineYMm - fontSizeMm * 0.9, maxWidthMm, heightMm);
 }
 
 export function exportTaskProtocolPDF({
@@ -1140,13 +1398,26 @@ export function exportTaskProtocolPDF({
   };
 
   // Section 3: Task Details, Checklist & Closing Notes
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(15, 23, 42);
-  const titleLines = doc.splitTextToSize(txt(`${labels.taskTitle} ${task.title}`), contentWidth);
-  ensurePageSpace(titleLines.length * 5.5 + 8);
-  doc.text(titleLines, margin, y);
-  y += titleLines.length * 5.5 + 3;
+  const preparedTitle = prepareSmartText(
+    doc,
+    `${labels.taskTitle} ${task.title}`,
+    contentWidth,
+    10.5,
+    'bold'
+  );
+  ensurePageSpace(preparedTitle.lines.length * 5.5 + 8);
+  renderSmartLines(
+    doc,
+    preparedTitle,
+    margin,
+    y,
+    contentWidth,
+    10.5,
+    'bold',
+    [15, 23, 42],
+    5.5
+  );
+  y += preparedTitle.lines.length * 5.5 + 3;
 
   if (task.bin_types && task.bin_types.length > 0) {
     doc.setFontSize(9.5);
@@ -1165,12 +1436,26 @@ export function exportTaskProtocolPDF({
     ensurePageSpace(12);
     doc.text(txt(labels.description), margin, y);
     y += 5;
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(15, 23, 42);
-    const descLines = doc.splitTextToSize(txt(task.description.trim()), contentWidth);
-    ensurePageSpace(descLines.length * 4.8 + 4);
-    doc.text(descLines, margin, y);
-    y += descLines.length * 4.8 + 4;
+    const preparedDesc = prepareSmartText(
+      doc,
+      task.description.trim(),
+      contentWidth,
+      9.5,
+      'normal'
+    );
+    ensurePageSpace(preparedDesc.lines.length * 4.8 + 4);
+    renderSmartLines(
+      doc,
+      preparedDesc,
+      margin,
+      y,
+      contentWidth,
+      9.5,
+      'normal',
+      [15, 23, 42],
+      4.8
+    );
+    y += preparedDesc.lines.length * 4.8 + 4;
   }
 
   if (task.checklist_json && task.checklist_json.length > 0) {
@@ -1300,9 +1585,9 @@ export function exportTaskProtocolPDF({
 
   const datePart = (task.completed_at || task.due_date || new Date().toISOString()).slice(0, 10);
   const safeTaskName =
-    sanitizeHelveticaText(task.title)
+    task.title
       .trim()
-      .replace(/[^a-zA-Z0-9äöüÄÖÜß_-]+/g, '_')
+      .replace(/[^\p{L}\p{N}_-]+/gu, '_')
       .replace(/^_+|_+$/g, '')
       .slice(0, 50) || 'Aufgabe';
 

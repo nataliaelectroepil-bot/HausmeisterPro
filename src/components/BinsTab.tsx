@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useTaskTranslation } from '../i18n/TaskTranslationContext';
 import { BinSchedule, BinType, FacilityTask, PropertyObject, User } from '../types/facility';
 import {
   formatDateDE,
@@ -31,6 +32,7 @@ import {
 } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { BIN_VISUAL_META, getTaskEffectiveBinTypes } from '../utils/binMeta';
+import { ConfirmDialog } from './ConfirmDialog';
 import { PhotoUploadButtons } from './PhotoUploadButtons';
 
 interface BinsTabProps {
@@ -69,6 +71,7 @@ export const BinsTab: React.FC<BinsTabProps> = ({
   onUpdateTask,
 }) => {
   const { t, tBin, tCategory, tPriority, tStatus, locale } = useTranslation();
+  const { getTaskTitle } = useTaskTranslation();
   const initialKW = useMemo(() => getISOWeekAndYear(new Date()), []);
   const [selectedKW, setSelectedKW] = useState<{ kw: number; year: number }>(initialKW);
   const [selectedBinFilter, setSelectedBinFilter] = useState<'Alle' | BinType>('Alle');
@@ -76,6 +79,12 @@ export const BinsTab: React.FC<BinsTabProps> = ({
   const [showNewModal, setShowNewModal] = useState(false);
   const [uploadingPhotoId, setUploadingPhotoId] = useState<string | null>(null);
   const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null);
+  const [pendingReopenTask, setPendingReopenTask] = useState<FacilityTask | null>(null);
+  const [pendingBinReset, setPendingBinReset] = useState<{
+    bin: BinSchedule;
+    field: 'out' | 'in';
+  } | null>(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
 
   // New Pickup Modal State
   const [newObjId, setNewObjId] = useState<string>(objects[0]?.id ?? '');
@@ -155,19 +164,61 @@ export const BinsTab: React.FC<BinsTabProps> = ({
   };
 
   const handleToggleOut = async (bin: BinSchedule) => {
-    const nextOut = !bin.status_out;
+    if (bin.status_out) {
+      setPendingBinReset({ bin, field: 'out' });
+      return;
+    }
     await onUpdateSchedule(bin.id, {
-      status_out: nextOut,
-      time_out: nextOut ? new Date().toISOString() : undefined,
+      status_out: true,
+      time_out: new Date().toISOString(),
     });
   };
 
   const handleToggleIn = async (bin: BinSchedule) => {
-    const nextIn = !bin.status_in;
+    if (bin.status_in) {
+      setPendingBinReset({ bin, field: 'in' });
+      return;
+    }
     await onUpdateSchedule(bin.id, {
-      status_in: nextIn,
-      time_in: nextIn ? new Date().toISOString() : undefined,
+      status_in: true,
+      time_in: new Date().toISOString(),
     });
+  };
+
+  const handleConfirmReopenTask = async () => {
+    if (!pendingReopenTask) return;
+    setConfirmLoading(true);
+    try {
+      await onUpdateTask(pendingReopenTask.id, {
+        status: 'offen',
+        completed_at: undefined,
+      });
+      setPendingReopenTask(null);
+    } finally {
+      setConfirmLoading(false);
+    }
+  };
+
+  const handleConfirmBinReset = async () => {
+    if (!pendingBinReset) return;
+    setConfirmLoading(true);
+    try {
+      const { bin, field } = pendingBinReset;
+      if (field === 'out') {
+        await onUpdateSchedule(bin.id, {
+          status_out: false,
+          time_out: undefined,
+        });
+      } else {
+        await onUpdateSchedule(bin.id, {
+          status_in: false,
+          time_in: undefined,
+        });
+      }
+      setPendingBinReset(null);
+    } finally {
+      setConfirmLoading(false);
+    }
   };
 
   const handleBinPhotoUpload = async (file: File, bin: BinSchedule) => {
@@ -198,7 +249,7 @@ export const BinsTab: React.FC<BinsTabProps> = ({
         objectName: obj?.name ?? t('common.object'),
         fallbackLat: obj?.lat,
         fallbackLng: obj?.lng,
-        caption: task.title,
+        caption: getTaskTitle(task),
       });
       await onQuickCompleteWithPhoto(task, photo);
     } finally {
@@ -471,7 +522,7 @@ export const BinsTab: React.FC<BinsTabProps> = ({
                         </div>
 
                         <h3 className="mt-2 font-display text-base font-bold text-slate-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors leading-snug">
-                          {task.title}
+                          {getTaskTitle(task)}
                         </h3>
 
                         <p className="mt-1.5 text-xs text-slate-600 dark:text-slate-300 flex items-start gap-1.5">
@@ -554,19 +605,22 @@ export const BinsTab: React.FC<BinsTabProps> = ({
                               />
                             </>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void onUpdateTask(task.id, {
-                                  status: 'offen',
-                                  completed_at: undefined,
-                                })
-                              }
-                              className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>{t('bins.reopenTask')}</span>
-                            </button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {task.completed_at && (
+                                <span className="font-mono text-[11px] font-medium text-emerald-700 dark:text-emerald-300 tabular-nums">
+                                  {t('taskModal.completedAtLabel')}:{' '}
+                                  {formatDateTimeDE(task.completed_at, locale)}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setPendingReopenTask(task)}
+                                className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>{t('bins.reopenTask')}</span>
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -863,6 +917,44 @@ export const BinsTab: React.FC<BinsTabProps> = ({
           </div>
         </div>
       )}
+      {/* Reopen Completed Task Confirmation */}
+      {pendingReopenTask && (
+        <ConfirmDialog
+          title={t('confirm.reopenTaskTitle')}
+          message={t('confirm.reopenTaskMessage')}
+          detail={getTaskTitle(pendingReopenTask)}
+          confirmLabel={t('confirm.reopenTaskConfirm')}
+          loading={confirmLoading}
+          onConfirm={handleConfirmReopenTask}
+          onCancel={() => setPendingReopenTask(null)}
+        />
+      )}
+
+      {/* Reset Bin Out / In Status Confirmation */}
+      {pendingBinReset && (() => {
+        const obj = objects.find((o) => o.id === pendingBinReset.bin.object_id);
+        const actionLabel =
+          pendingBinReset.field === 'out' ? t('bins.out') : t('bins.in');
+        const ts =
+          pendingBinReset.field === 'out'
+            ? pendingBinReset.bin.time_out
+            : pendingBinReset.bin.time_in;
+        const oclockSuffix = t('common.oclock') ? ` ${t('common.oclock')}` : '';
+        const detail = `${obj?.name ?? t('common.object')} · ${tBin(pendingBinReset.bin.bin_type)} · ${actionLabel}${
+          ts ? ` (${formatTimeDE(ts)}${oclockSuffix})` : ''
+        }`;
+        return (
+          <ConfirmDialog
+            title={t('confirm.resetBinStatusTitle')}
+            message={t('confirm.resetBinStatusMessage')}
+            detail={detail}
+            confirmLabel={t('confirm.resetBinStatusConfirm')}
+            loading={confirmLoading}
+            onConfirm={handleConfirmBinReset}
+            onCancel={() => setPendingBinReset(null)}
+          />
+        );
+      })()}
     </div>
   );
 };

@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ExternalLink,
   List,
+  Loader2,
   Map as MapIcon,
   MapPin,
   Navigation,
@@ -14,11 +15,12 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useTaskTranslation } from '../i18n/TaskTranslationContext';
 import { FacilityTask, PropertyObject } from '../types/facility';
 import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { searchAddressCoordinates } from '../utils/geocoding';
-import { PhotoUploadButtons } from './PhotoUploadButtons';
+import { CompleteTaskModal } from './CompleteTaskModal';
 
 interface MapTabProps {
   objects: PropertyObject[];
@@ -134,13 +136,17 @@ export const MapTab: React.FC<MapTabProps> = ({
   onOpenModulesForObject,
 }) => {
   const { t, tCategory, tStatus } = useTranslation();
+  const { getTaskTitle, getTaskDescription } = useTaskTranslation();
   const [viewMode, setViewMode] = useState<'karte' | 'objektliste'>('karte');
-  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(
-    objects[0]?.id ?? null
-  );
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [selectedStandaloneTaskId, setSelectedStandaloneTaskId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [completeModalTarget, setCompleteModalTarget] = useState<{
+    task: FacilityTask;
+    meta: { name: string; lat?: number; lng?: number };
+  } | null>(null);
+  const [completeError, setCompleteError] = useState<string | null>(null);
   const [geocodedTaskCoords, setGeocodedTaskCoords] = useState<
     Record<string, { lat: number; lng: number }>
   >({});
@@ -148,7 +154,6 @@ export const MapTab: React.FC<MapTabProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
-  const hasAutoSelectedRef = useRef(Boolean(objects[0]?.id));
   const attemptedGeocodeRef = useRef<Set<string>>(new Set());
 
   const validObjects = useMemo(() => objects.filter(hasValidCoords), [objects]);
@@ -287,13 +292,6 @@ export const MapTab: React.FC<MapTabProps> = ({
     [standaloneTaskPins]
   );
 
-  useEffect(() => {
-    if (!hasAutoSelectedRef.current && objects.length > 0 && !selectedStandaloneTaskId) {
-      setSelectedObjectId(objects[0].id);
-      hasAutoSelectedRef.current = true;
-    }
-  }, [objects, selectedStandaloneTaskId]);
-
   const tasksByObject = useMemo(() => {
     const map = new Map<string, FacilityTask[]>();
     objects.forEach((o) => map.set(o.id, []));
@@ -402,7 +400,7 @@ export const MapTab: React.FC<MapTabProps> = ({
       });
       const popupHtml = `
         <div style="min-width:170px;font-family:var(--font-sans)">
-          <div style="font-weight:700;font-size:13px;margin-bottom:2px;">${escapeHtml(pin.task.title)}</div>
+          <div style="font-weight:700;font-size:13px;margin-bottom:2px;">${escapeHtml(getTaskTitle(pin.task))}</div>
           <div style="font-size:11px;color:#475569;margin-bottom:4px;">${escapeHtml(pin.address)}</div>
           <div style="font-size:11px;font-weight:600;color:#ea580c;">${escapeHtml(tStatus(pin.task.status))}</div>
         </div>
@@ -423,6 +421,7 @@ export const MapTab: React.FC<MapTabProps> = ({
     selectedStandaloneTaskId,
     viewMode,
     tStatus,
+    getTaskTitle,
   ]);
 
   const selectedObject = objects.find((o) => o.id === selectedObjectId) ?? null;
@@ -444,14 +443,18 @@ export const MapTab: React.FC<MapTabProps> = ({
     meta: { name: string; lat?: number; lng?: number }
   ) => {
     setUploadingId(task.id);
+    setCompleteError(null);
     try {
       const photo = await createWatermarkedPhoto(file, {
         objectName: meta.name,
         fallbackLat: meta.lat,
         fallbackLng: meta.lng,
-        caption: task.title,
+        caption: getTaskTitle(task),
       });
       await onQuickCompleteWithPhoto(task, photo);
+      setCompleteModalTarget(null);
+    } catch (err) {
+      setCompleteError(err instanceof Error ? err.message : 'Foto konnte nicht verarbeitet werden.');
     } finally {
       setUploadingId(null);
     }
@@ -565,30 +568,49 @@ export const MapTab: React.FC<MapTabProps> = ({
                   </div>
 
                   <p className="text-sm font-semibold text-slate-900 dark:text-white leading-snug">
-                    {primaryTask.title}
+                    {getTaskTitle(primaryTask)}
                   </p>
                   <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
-                    {primaryTask.description || t('map.noFurtherNotes')}
+                    {getTaskDescription(primaryTask) || t('map.noFurtherNotes')}
                   </p>
                   <p className="text-[11px] font-mono text-slate-400 tabular-nums">
                     {t('common.created')}: {formatDateTimeDE(primaryTask.created_at)}
                   </p>
+                  {primaryTask.status === 'erledigt' && primaryTask.completed_at && (
+                    <p className="text-[11px] font-mono font-medium text-emerald-700 dark:text-emerald-300 tabular-nums">
+                      {t('taskModal.completedAtLabel')}: {formatDateTimeDE(primaryTask.completed_at)}
+                    </p>
+                  )}
 
                   <div className="pt-1 flex flex-wrap items-center gap-2">
                     {primaryTask.status !== 'erledigt' && (
-                      <PhotoUploadButtons
-                        onSelectFile={(file) =>
-                          handleQuickPhotoComplete(file, primaryTask, {
-                            name: selectedObject.name,
-                            lat: selectedObject.lat,
-                            lng: selectedObject.lng,
-                          })
-                        }
-                        loading={uploadingId === primaryTask.id}
-                        loadingLabel={t('common.photoSending')}
-                        variant="emerald"
-                        fullWidth
-                      />
+                      <button
+                        type="button"
+                        disabled={uploadingId === primaryTask.id}
+                        onClick={() => {
+                          setCompleteError(null);
+                          setCompleteModalTarget({
+                            task: primaryTask,
+                            meta: {
+                              name: selectedObject.name,
+                              lat: selectedObject.lat,
+                              lng: selectedObject.lng,
+                            },
+                          });
+                        }}
+                        className="flex-1 min-w-[160px] flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white transition-colors min-h-[44px] cursor-pointer"
+                      >
+                        {uploadingId === primaryTask.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        )}
+                        <span>
+                          {uploadingId === primaryTask.id
+                            ? t('common.photoSending')
+                            : t('tasks.completeTask')}
+                        </span>
+                      </button>
                     )}
 
                     <button
@@ -683,7 +705,7 @@ export const MapTab: React.FC<MapTabProps> = ({
                     </span>
                   </div>
                   <h3 className="mt-1 font-display text-base font-bold text-slate-900 dark:text-white leading-snug">
-                    {selectedStandalonePin.task.title}
+                    {getTaskTitle(selectedStandalonePin.task)}
                   </h3>
                   <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
                     <MapPin className="w-3.5 h-3.5 text-orange-500 shrink-0" />
@@ -725,24 +747,45 @@ export const MapTab: React.FC<MapTabProps> = ({
                 </div>
 
                 <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
-                  {selectedStandalonePin.task.description || t('map.noFurtherNotes')}
+                  {getTaskDescription(selectedStandalonePin.task) || t('map.noFurtherNotes')}
                 </p>
+                {selectedStandalonePin.task.status === 'erledigt' &&
+                  selectedStandalonePin.task.completed_at && (
+                    <p className="text-[11px] font-mono font-medium text-emerald-700 dark:text-emerald-300 tabular-nums">
+                      {t('taskModal.completedAtLabel')}:{' '}
+                      {formatDateTimeDE(selectedStandalonePin.task.completed_at)}
+                    </p>
+                  )}
 
                 <div className="pt-1 flex flex-wrap items-center gap-2">
                   {selectedStandalonePin.task.status !== 'erledigt' && (
-                    <PhotoUploadButtons
-                      onSelectFile={(file) =>
-                        handleQuickPhotoComplete(file, selectedStandalonePin.task, {
-                          name: selectedStandalonePin.address,
-                          lat: selectedStandalonePin.lat,
-                          lng: selectedStandalonePin.lng,
-                        })
-                      }
-                      loading={uploadingId === selectedStandalonePin.task.id}
-                      loadingLabel={t('common.photoSending')}
-                      variant="emerald"
-                      fullWidth
-                    />
+                    <button
+                      type="button"
+                      disabled={uploadingId === selectedStandalonePin.task.id}
+                      onClick={() => {
+                        setCompleteError(null);
+                        setCompleteModalTarget({
+                          task: selectedStandalonePin.task,
+                          meta: {
+                            name: selectedStandalonePin.address,
+                            lat: selectedStandalonePin.lat,
+                            lng: selectedStandalonePin.lng,
+                          },
+                        });
+                      }}
+                      className="flex-1 min-w-[160px] flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white transition-colors min-h-[44px] cursor-pointer"
+                    >
+                      {uploadingId === selectedStandalonePin.task.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      )}
+                      <span>
+                        {uploadingId === selectedStandalonePin.task.id
+                          ? t('common.photoSending')
+                          : t('tasks.completeTask')}
+                      </span>
+                    </button>
                   )}
 
                   <button
@@ -867,6 +910,24 @@ export const MapTab: React.FC<MapTabProps> = ({
             })}
           </div>
         </div>
+      )}
+
+      {completeModalTarget && (
+        <CompleteTaskModal
+          taskTitle={getTaskTitle(completeModalTarget.task)}
+          subtitle={completeModalTarget.meta.name}
+          allowWithoutPhoto={false}
+          loading={uploadingId === completeModalTarget.task.id}
+          error={completeError}
+          onSelectPhoto={(file) =>
+            handleQuickPhotoComplete(file, completeModalTarget.task, completeModalTarget.meta)
+          }
+          onClose={() => {
+            if (uploadingId) return;
+            setCompleteError(null);
+            setCompleteModalTarget(null);
+          }}
+        />
       )}
     </div>
   );

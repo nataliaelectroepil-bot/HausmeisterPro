@@ -166,10 +166,12 @@ export interface MeterReading {
 export type HandoverType = 'Einzug' | 'Auszug';
 
 export interface HandoverRoomCheck {
+  id?: string;
   room: string;
   condition: 'Einwandfrei' | 'Mängel vorhanden';
   notes: string;
   photo?: TaskPhoto;
+  isCustom?: boolean;
 }
 
 export interface HandoverKeys {

@@ -267,6 +267,10 @@ function normalizeTaskRecord(task: FacilityTask): FacilityTask {
         : undefined,
     notes: typeof task.notes === 'string' ? task.notes : '',
     description: typeof task.description === 'string' ? task.description : '',
+    signature:
+      typeof task.signature === 'string' && task.signature.trim()
+        ? task.signature
+        : undefined,
   };
 }
 
@@ -1626,6 +1630,9 @@ export const pocketbaseService = {
         pbPatch.completed_lng = null;
         pbPatch.completed_accuracy = null;
       }
+      if ('signature' in normalizedPatch && !normalizedPatch.signature) {
+        pbPatch.signature = null;
+      }
       await pbRequest(`/api/collections/${pocketbaseConfig.collections.tasks}/records/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(pbPatch),
@@ -1641,6 +1648,9 @@ export const pocketbaseService = {
         merged.completed_lat = undefined;
         merged.completed_lng = undefined;
         merged.completed_accuracy = undefined;
+      }
+      if ('signature' in normalizedPatch && !normalizedPatch.signature) {
+        delete merged.signature;
       }
       return merged;
     });
@@ -1702,11 +1712,18 @@ export const pocketbaseService = {
       : patch;
 
     if (this.isPocketBaseEnabled()) {
+      const pbPatch: Record<string, unknown> = { ...safePatch };
+      if (safePatch.status_out === false) {
+        pbPatch.time_out = null;
+      }
+      if (safePatch.status_in === false) {
+        pbPatch.time_in = null;
+      }
       await pbRequest(
         `/api/collections/${pocketbaseConfig.collections.bin_schedules}/records/${id}`,
         {
           method: 'PATCH',
-          body: JSON.stringify(safePatch),
+          body: JSON.stringify(pbPatch),
         }
       );
       return this.getBinSchedules();

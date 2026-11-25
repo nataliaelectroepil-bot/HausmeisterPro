@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Camera,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -7,9 +8,12 @@ import {
   FileSignature,
   Gauge,
   KeyRound,
+  Loader2,
   Mail,
   Minus,
   Plus,
+  Trash2,
+  X,
 } from 'lucide-react';
 import {
   HandoverKeys,
@@ -25,7 +29,7 @@ import { formatDateTimeDE } from '../../utils/dateUtils';
 import { exportHandoverProtocolPDF } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { SignaturePad } from '../SignaturePad';
-import { PhotoUploadButtons } from '../PhotoUploadButtons';
+import { CompleteTaskModal } from '../CompleteTaskModal';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 interface UebergabeModuleProps {
@@ -40,12 +44,25 @@ interface UebergabeModuleProps {
 }
 
 const DEFAULT_ROOMS: HandoverRoomCheck[] = [
-  { room: 'Wohnzimmer', condition: 'Einwandfrei', notes: '' },
-  { room: 'Küche', condition: 'Einwandfrei', notes: '' },
-  { room: 'Bad', condition: 'Einwandfrei', notes: '' },
-  { room: 'Schlafzimmer', condition: 'Einwandfrei', notes: '' },
-  { room: 'Flur', condition: 'Einwandfrei', notes: '' },
-  { room: 'Balkon/Keller', condition: 'Einwandfrei', notes: '' },
+  { id: 'def_living', room: 'Wohnzimmer', condition: 'Einwandfrei', notes: '' },
+  { id: 'def_kitchen', room: 'Küche', condition: 'Einwandfrei', notes: '' },
+  { id: 'def_bath', room: 'Bad', condition: 'Einwandfrei', notes: '' },
+  { id: 'def_bedroom', room: 'Schlafzimmer', condition: 'Einwandfrei', notes: '' },
+  { id: 'def_hall', room: 'Flur', condition: 'Einwandfrei', notes: '' },
+  { id: 'def_balcony', room: 'Balkon/Keller', condition: 'Einwandfrei', notes: '' },
+];
+
+const ROOM_PRESETS = [
+  'Kinderzimmer',
+  'Schlafzimmer',
+  'Flur',
+  'Balkon',
+  'Arbeitszimmer',
+  'Gäste-WC',
+  'Abstellraum',
+  'Terrasse',
+  'Keller',
+  'Garage',
 ];
 
 export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
@@ -89,6 +106,10 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
   const [sigTenant, setSigTenant] = useState<string | undefined>(undefined);
   const [lastCreated, setLastCreated] = useState<HandoverProtocol | null>(null);
   const [uploadingRoomIdx, setUploadingRoomIdx] = useState<number | null>(null);
+  const [photoChoiceRoomIdx, setPhotoChoiceRoomIdx] = useState<number | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [showAddRoomPanel, setShowAddRoomPanel] = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -98,22 +119,60 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
   const selectedObject = objects.find((o) => o.id === objectId);
 
   const handleRoomPhoto = async (idx: number, file: File) => {
-    if (!selectedObject) return;
+    const targetRoom = rooms[idx];
+    if (!targetRoom) return;
     setUploadingRoomIdx(idx);
+    setPhotoError(null);
     try {
-      const roomName = rooms[idx].room;
+      const roomName = targetRoom.room;
+      const objName = selectedObject?.name ?? t('common.object');
       const photo = await createWatermarkedPhoto(file, {
-        objectName: `${selectedObject.name} · ${apartment}`,
-        fallbackLat: selectedObject.lat,
-        fallbackLng: selectedObject.lng,
+        objectName: `${objName} · ${apartment}`,
+        fallbackLat: selectedObject?.lat,
+        fallbackLng: selectedObject?.lng,
         caption: `Übergabe ${roomName}`,
       });
       setRooms((prev) =>
         prev.map((r, i) => (i === idx ? { ...r, photo } : r))
       );
+      setPhotoChoiceRoomIdx(null);
+    } catch (err) {
+      setPhotoError(
+        err instanceof Error ? err.message : 'Foto konnte nicht verarbeitet werden.'
+      );
     } finally {
       setUploadingRoomIdx(null);
     }
+  };
+
+  const handleAddRoom = (roomLabel?: string) => {
+    const trimmed = (roomLabel ?? newRoomName).trim();
+    if (!trimmed) return;
+    setRooms((prev) => [
+      ...prev,
+      {
+        id: `room_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        room: trimmed,
+        condition: 'Einwandfrei',
+        notes: '',
+        isCustom: true,
+      },
+    ]);
+    setNewRoomName('');
+    setShowAddRoomPanel(false);
+  };
+
+  const handleRemoveRoom = (idx: number) => {
+    setRooms((prev) => prev.filter((_, i) => i !== idx));
+    if (photoChoiceRoomIdx === idx) {
+      setPhotoChoiceRoomIdx(null);
+    }
+  };
+
+  const handleRemoveRoomPhoto = (idx: number) => {
+    setRooms((prev) =>
+      prev.map((r, i) => (i === idx ? { ...r, photo: undefined } : r))
+    );
   };
 
   const handleFinish = async () => {
@@ -149,6 +208,8 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
     setTenantName('');
     setTenantEmail('');
     setRooms(DEFAULT_ROOMS.map((r) => ({ ...r })));
+    setShowAddRoomPanel(false);
+    setNewRoomName('');
     setSigLandlord(undefined);
     setSigTenant(undefined);
     setLastCreated(null);
@@ -293,61 +354,225 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
 
         {step === 2 && (
           <div className="space-y-3">
-            {rooms.map((roomItem, idx) => (
-              <div
-                key={roomItem.room}
-                className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3"
+            {rooms.map((roomItem, idx) => {
+              const roomKey = roomItem.id || `${roomItem.room}_${idx}`;
+              const isUploading = uploadingRoomIdx === idx;
+              return (
+                <div
+                  key={roomKey}
+                  className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-display text-sm font-bold text-slate-900 dark:text-white truncate">
+                        {tRoom(roomItem.room)}
+                      </span>
+                      {roomItem.photo && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                          <CheckCircle2 className="w-3 h-3" />
+                          {t('handover.photoAttached')}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {(['Einwandfrei', 'Mängel vorhanden'] as const).map((cond) => (
+                        <button
+                          key={cond}
+                          type="button"
+                          onClick={() =>
+                            setRooms((prev) =>
+                              prev.map((r, i) => (i === idx ? { ...r, condition: cond } : r))
+                            )
+                          }
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                            roomItem.condition === cond
+                              ? cond === 'Einwandfrei'
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-red-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {cond === 'Einwandfrei'
+                            ? t('handover.condOk')
+                            : t('handover.condDefect')}
+                        </button>
+                      ))}
+
+                      {roomItem.isCustom && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveRoom(idx)}
+                          aria-label={t('handover.deleteRoom')}
+                          title={t('handover.deleteRoom')}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-red-600 hover:border-red-300 dark:hover:border-red-800 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={roomItem.notes}
+                      onChange={(e) =>
+                        setRooms((prev) =>
+                          prev.map((r, i) => (i === idx ? { ...r, notes: e.target.value } : r))
+                        )
+                      }
+                      placeholder={t('handover.roomNotesPlaceholder')}
+                      className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white"
+                    />
+
+                    <button
+                      type="button"
+                      disabled={isUploading}
+                      onClick={() => {
+                        setPhotoError(null);
+                        setPhotoChoiceRoomIdx(idx);
+                      }}
+                      className="flex items-center justify-center gap-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-60 px-3.5 py-2 text-xs font-semibold text-white transition-colors cursor-pointer min-h-[38px] whitespace-nowrap"
+                    >
+                      {isUploading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                      ) : (
+                        <Camera className="w-3.5 h-3.5 shrink-0" />
+                      )}
+                      <span>
+                        {isUploading
+                          ? t('common.photoSending')
+                          : roomItem.photo
+                            ? t('handover.replacePhoto')
+                            : t('handover.addPhoto')}
+                      </span>
+                    </button>
+                  </div>
+
+                  {roomItem.photo && (
+                    <div className="flex items-center gap-3 pt-1">
+                      <div className="relative h-16 w-24 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0">
+                        <img
+                          src={roomItem.photo.dataUrl}
+                          alt={tRoom(roomItem.room)}
+                          referrerPolicy="no-referrer"
+                          className="h-full w-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveRoomPhoto(idx)}
+                          aria-label={t('handover.removePhoto')}
+                          title={t('handover.removePhoto')}
+                          className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded bg-slate-950/75 text-white hover:bg-red-600 transition-colors cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                        {formatDateTimeDE(roomItem.photo.timestamp)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Add Another Room Section */}
+            {!showAddRoomPanel ? (
+              <button
+                type="button"
+                onClick={() => setShowAddRoomPanel(true)}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-orange-500 dark:hover:border-orange-500 py-3 px-4 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:text-orange-600 dark:hover:text-orange-400 transition-colors cursor-pointer"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-display text-sm font-bold text-slate-900 dark:text-white">
-                    {tRoom(roomItem.room)}
-                  </span>
-                  <div className="flex gap-1.5">
-                    {(['Einwandfrei', 'Mängel vorhanden'] as const).map((cond) => (
+                <Plus className="w-4 h-4" />
+                <span>{t('handover.addRoomBtn').replace(/^\+\s*/, '')}</span>
+              </button>
+            ) : (
+              <div className="rounded-xl border border-orange-300 dark:border-orange-800 bg-orange-50/50 dark:bg-orange-950/20 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                    {t('handover.addRoomTitle')}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddRoomPanel(false);
+                      setNewRoomName('');
+                    }}
+                    aria-label={t('common.close')}
+                    className="p-1 rounded-lg text-slate-500 hover:bg-slate-200/70 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
+                    {t('handover.presetRoomsLabel')}
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ROOM_PRESETS.map((preset) => (
                       <button
-                        key={cond}
+                        key={preset}
                         type="button"
-                        onClick={() =>
-                          setRooms((prev) =>
-                            prev.map((r, i) => (i === idx ? { ...r, condition: cond } : r))
-                          )
-                        }
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
-                          roomItem.condition === cond
-                            ? cond === 'Einwandfrei'
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-red-600 text-white'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                        }`}
+                        onClick={() => handleAddRoom(preset)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
                       >
-                        {cond === 'Einwandfrei'
-                          ? t('handover.condOk')
-                          : t('handover.condDefect')}
+                        <Plus className="w-3 h-3" />
+                        <span>{tRoom(preset)}</span>
                       </button>
                     ))}
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={roomItem.notes}
-                    onChange={(e) =>
-                      setRooms((prev) =>
-                        prev.map((r, i) => (i === idx ? { ...r, notes: e.target.value } : r))
-                      )
-                    }
-                    placeholder={t('handover.roomNotesPlaceholder')}
-                    className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white"
-                  />
-                  <PhotoUploadButtons
-                    compact
-                    loading={uploadingRoomIdx === idx}
-                    onSelectFile={(file) => handleRoomPhoto(idx, file)}
-                  />
+                <div className="pt-1">
+                  <label
+                    htmlFor="custom-room-name"
+                    className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5"
+                  >
+                    {t('handover.customRoomLabel')}
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      id="custom-room-name"
+                      type="text"
+                      value={newRoomName}
+                      onChange={(e) => setNewRoomName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddRoom();
+                        }
+                      }}
+                      placeholder={t('handover.customRoomPlaceholder')}
+                      className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs sm:text-sm text-slate-900 dark:text-white focus:border-orange-500 focus:outline-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddRoomPanel(false);
+                          setNewRoomName('');
+                        }}
+                        className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                      >
+                        {t('common.cancel')}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!newRoomName.trim()}
+                        onClick={() => handleAddRoom()}
+                        className="flex items-center gap-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{t('handover.addRoomConfirm')}</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-            ))}
+            )}
           </div>
         )}
 
@@ -589,6 +814,25 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
           })}
         </div>
       </div>
+
+      {/* Room Photo Source Choice Modal (Camera vs Gallery) */}
+      {photoChoiceRoomIdx !== null && rooms[photoChoiceRoomIdx] && (
+        <CompleteTaskModal
+          title={t('handover.photoModalTitle')}
+          hint={t('handover.photoModalHint')}
+          taskTitle={tRoom(rooms[photoChoiceRoomIdx].room)}
+          subtitle={`${selectedObject?.name ?? t('common.object')} · ${apartment}`}
+          allowWithoutPhoto={false}
+          loading={uploadingRoomIdx === photoChoiceRoomIdx}
+          error={photoError}
+          onSelectPhoto={(file) => handleRoomPhoto(photoChoiceRoomIdx, file)}
+          onClose={() => {
+            if (uploadingRoomIdx !== null) return;
+            setPhotoError(null);
+            setPhotoChoiceRoomIdx(null);
+          }}
+        />
+      )}
     </div>
   );
 };

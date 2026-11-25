@@ -8,6 +8,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useTaskTranslation } from '../i18n/TaskTranslationContext';
 import { BinSchedule, BinType, FacilityTask, PropertyObject } from '../types/facility';
 import {
   formatDateDE,
@@ -18,6 +19,7 @@ import {
   getWeekStartEnd,
 } from '../utils/dateUtils';
 import { BIN_VISUAL_META } from '../utils/binMeta';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface CalendarTabProps {
   tasks: FacilityTask[];
@@ -44,10 +46,13 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
   onToggleBinOut,
 }) => {
   const { t, tCategory, tBin, weekdays, weekdaysLong, months, locale } = useTranslation();
+  const { getTaskTitle } = useTaskTranslation();
   const todayStr = getTodayISODate();
   const [viewMode, setViewMode] = useState<'monat' | 'woche'>('monat');
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [cursorDate, setCursorDate] = useState<Date>(() => new Date());
+  const [pendingBinReset, setPendingBinReset] = useState<BinSchedule | null>(null);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const monthLabel = `${months[cursorDate.getMonth()] ?? ''} ${cursorDate.getFullYear()}`;
 
@@ -242,7 +247,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                     {dayTasks.slice(0, 3).map((t) => (
                       <span
                         key={t.id}
-                        title={t.title}
+                        title={getTaskTitle(t)}
                         className={`h-2 w-2 rounded-sm ${
                           t.status === 'erledigt'
                             ? 'bg-emerald-500'
@@ -334,7 +339,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                       </span>
                     </div>
                     <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
-                      {task.title}
+                      {getTaskTitle(task)}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">
                       {obj?.name ?? (task.address || t('common.object'))}
@@ -378,7 +383,13 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => onToggleBinOut(bin)}
+                      onClick={() => {
+                        if (bin.status_out) {
+                          setPendingBinReset(bin);
+                          return;
+                        }
+                        void onToggleBinOut(bin);
+                      }}
                       className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold cursor-pointer ${
                         bin.status_out
                           ? 'bg-emerald-600 text-white'
@@ -400,6 +411,32 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
           )}
         </div>
       </div>
+
+      {pendingBinReset && (() => {
+        const obj = objects.find((o) => o.id === pendingBinReset.object_id);
+        const detail = `${obj?.name ?? t('common.object')} · ${tBin(pendingBinReset.bin_type)} · ${t('bins.out')}${
+          pendingBinReset.time_out ? ` (${formatTimeDE(pendingBinReset.time_out)})` : ''
+        }`;
+        return (
+          <ConfirmDialog
+            title={t('confirm.resetBinStatusTitle')}
+            message={t('confirm.resetBinStatusMessage')}
+            detail={detail}
+            confirmLabel={t('confirm.resetBinStatusConfirm')}
+            loading={resetLoading}
+            onConfirm={async () => {
+              setResetLoading(true);
+              try {
+                await onToggleBinOut(pendingBinReset);
+                setPendingBinReset(null);
+              } finally {
+                setResetLoading(false);
+              }
+            }}
+            onCancel={() => setPendingBinReset(null)}
+          />
+        );
+      })()}
     </div>
   );
 };

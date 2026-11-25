@@ -4,15 +4,20 @@ import {
   Check,
   CheckCircle2,
   FileText,
+  Loader2,
+  Lock,
   MapPin,
   PenTool,
+  Pencil,
   Plus,
   Save,
   Trash2,
   X,
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useTaskTranslation } from '../i18n/TaskTranslationContext';
 import {
+  ChecklistItem,
   FacilityTask,
   PropertyObject,
   TaskPhoto,
@@ -23,6 +28,7 @@ import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { BIN_VISUAL_META } from '../utils/binMeta';
 import { exportTaskProtocolPDF } from '../utils/pdfExport';
+import { ConfirmDialog } from './ConfirmDialog';
 import { PhotoUploadButtons } from './PhotoUploadButtons';
 
 interface TaskDetailModalProps {
@@ -40,90 +46,189 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onClose,
   onUpdateTask,
 }) => {
-  const { t, tCategory, tStatus, tBin, docLanguage } = useTranslation();
-  const [notes, setNotes] = useState(task.notes);
+  const { t, tCategory, tStatus, tBin, docLanguage, language } = useTranslation();
+  const { getTaskTitle, getTaskDescription, ensureTaskTranslated } = useTaskTranslation();
+  const [draftStatus, setDraftStatus] = useState<TaskStatus>(task.status);
+  const [draftChecklist, setDraftChecklist] = useState<ChecklistItem[]>(() =>
+    task.checklist_json.map((c) => ({ ...c }))
+  );
+  const [draftNotes, setDraftNotes] = useState(task.notes);
+  const [draftPhotos, setDraftPhotos] = useState<TaskPhoto[]>(() => [...task.photos]);
+  const [draftSignature, setDraftSignature] = useState<string | undefined>(() => task.signature);
+  const [isEditing, setIsEditing] = useState(false);
   const [newCheckItem, setNewCheckItem] = useState('');
-  const [savingNotes, setSavingNotes] = useState(false);
+  const [savingChanges, setSavingChanges] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<TaskPhoto | null>(null);
+  const [pendingReopenStatus, setPendingReopenStatus] = useState<TaskStatus | null>(null);
+
+  const displayTitle = getTaskTitle(task);
+  const displayDescription = getTaskDescription(task);
 
   // Signature pad refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawingRef = useRef(false);
   const [hasDrawnSignature, setHasDrawnSignature] = useState(false);
 
+  // Reset drafts cleanly when opening a different task
   useEffect(() => {
-    setNotes(task.notes);
-  }, [task.id, task.notes]);
+    setDraftStatus(task.status);
+    setDraftChecklist(task.checklist_json.map((c) => ({ ...c })));
+    setDraftNotes(task.notes);
+    setDraftPhotos([...task.photos]);
+    setDraftSignature(task.signature);
+    setIsEditing(false);
+    setHasDrawnSignature(false);
+    setNewCheckItem('');
+    setSavedNotice(false);
+    setPendingReopenStatus(null);
+  }, [task.id]);
 
-  const overdue = isTaskOverdue(task.due_date, task.status);
-  const completedChecks = task.checklist_json.filter((c) => c.checked).length;
+  const isReadOnly = task.status === 'erledigt' && !isEditing;
 
-  const handleToggleChecklist = async (itemId: string) => {
-    const updated = task.checklist_json.map((c) =>
-      c.id === itemId ? { ...c, checked: !c.checked } : c
+  const hasChecklistChanged =
+    draftChecklist.length !== task.checklist_json.length ||
+    draftChecklist.some((item, idx) => {
+      const orig = task.checklist_json[idx];
+      return !orig || orig.id !== item.id || orig.label !== item.label || orig.checked !== item.checked;
+    });
+
+  const hasPhotosChanged =
+    draftPhotos.length !== task.photos.length ||
+    draftPhotos.some((item, idx) => item.id !== task.photos[idx]?.id);
+
+  const hasSignatureChanged =
+    (draftSignature ?? '') !== (task.signature ?? '') || hasDrawnSignature;
+
+  const hasUnsavedChanges =
+    draftStatus !== task.status ||
+    draftNotes !== task.notes ||
+    hasChecklistChanged ||
+    hasPhotosChanged ||
+    hasSignatureChanged;
+
+  const showEditFooter = isEditing || hasUnsavedChanges;
+
+  const overdue = isTaskOverdue(task.due_date, draftStatus);
+  const completedChecks = draftChecklist.filter((c) => c.checked).length;
+
+  const handleToggleChecklist = (itemId: string) => {
+    if (isReadOnly) return;
+    setDraftChecklist((prev) =>
+      prev.map((c) => (c.id === itemId ? { ...c, checked: !c.checked } : c))
     );
-    await onUpdateTask(task.id, { checklist_json: updated });
   };
 
-  const handleAddChecklistItem = async (e: React.FormEvent) => {
+  const handleAddChecklistItem = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isReadOnly) return;
     const label = newCheckItem.trim();
     if (!label) return;
-    const updated = [
-      ...task.checklist_json,
-      { id: `chk_${Date.now()}`, label, checked: false },
-    ];
+    setDraftChecklist((prev) => [
+      ...prev,
+      { id: `chk_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`, label, checked: false },
+    ]);
     setNewCheckItem('');
-    await onUpdateTask(task.id, { checklist_json: updated });
   };
 
-  const handleSaveNotes = async () => {
-    setSavingNotes(true);
-    await onUpdateTask(task.id, { notes });
-    setSavingNotes(false);
-    setSavedNotice(true);
-    window.setTimeout(() => setSavedNotice(false), 2000);
+  const handleStatusChange = (status: TaskStatus) => {
+    if (isReadOnly) return;
+    if (task.status === 'erledigt' && draftStatus === 'erledigt' && status !== 'erledigt') {
+      setPendingReopenStatus(status);
+      return;
+    }
+    setDraftStatus(status);
   };
 
-  const handleStatusChange = async (status: TaskStatus) => {
-    setUpdatingStatus(true);
+  const handleSaveChanges = async () => {
+    setSavingChanges(true);
     try {
+      const pendingDrawnDataUrl =
+        !draftSignature && hasDrawnSignature && canvasRef.current
+          ? canvasRef.current.toDataURL('image/png')
+          : undefined;
+      const finalSignature = draftSignature ?? pendingDrawnDataUrl;
+
       await onUpdateTask(task.id, {
-        status,
-        completed_at: status === 'erledigt' ? new Date().toISOString() : undefined,
+        status: draftStatus,
+        checklist_json: draftChecklist,
+        notes: draftNotes,
+        photos: draftPhotos,
+        signature: finalSignature,
+        completed_at:
+          draftStatus === 'erledigt'
+            ? task.completed_at || new Date().toISOString()
+            : undefined,
       });
+      setDraftSignature(finalSignature);
+      setHasDrawnSignature(false);
+      setIsEditing(false);
+      setSavedNotice(true);
+      window.setTimeout(() => setSavedNotice(false), 2500);
     } finally {
-      setUpdatingStatus(false);
+      setSavingChanges(false);
     }
   };
 
+  const handleCancelChanges = () => {
+    setDraftStatus(task.status);
+    setDraftChecklist(task.checklist_json.map((c) => ({ ...c })));
+    setDraftNotes(task.notes);
+    setDraftPhotos([...task.photos]);
+    setDraftSignature(task.signature);
+    setHasDrawnSignature(false);
+    clearSignaturePad();
+    setNewCheckItem('');
+    setPendingReopenStatus(null);
+    if (task.status === 'erledigt' && isEditing) {
+      setIsEditing(false);
+      return;
+    }
+    onClose();
+  };
+
   const handlePhotoUpload = async (file: File, markCompleted = false) => {
+    if (isReadOnly && !markCompleted) return;
     setUploadingPhoto(true);
     try {
       const watermarked = await createWatermarkedPhoto(file, {
         objectName: objectItem?.name ?? t('common.object'),
         fallbackLat: objectItem?.lat,
         fallbackLng: objectItem?.lng,
-        caption: task.title,
+        caption: displayTitle,
       });
-      const nextPhotos = [...task.photos, watermarked];
+      const nextPhotos = [...draftPhotos, watermarked];
+      setDraftPhotos(nextPhotos);
+
+      if (isEditing && !markCompleted) {
+        return;
+      }
+
       await onUpdateTask(task.id, {
         photos: nextPhotos,
-        notes,
+        notes: draftNotes,
+        checklist_json: draftChecklist,
         ...(markCompleted
-          ? { status: 'erledigt', completed_at: new Date().toISOString() }
+          ? { status: 'erledigt', completed_at: task.completed_at || new Date().toISOString() }
           : {}),
       });
+      if (markCompleted) {
+        setDraftStatus('erledigt');
+      }
     } finally {
       setUploadingPhoto(false);
     }
   };
 
   const handleRemovePhoto = async (photoId: string) => {
-    const nextPhotos = task.photos.filter((p) => p.id !== photoId);
+    if (isReadOnly) return;
+    const nextPhotos = draftPhotos.filter((p) => p.id !== photoId);
+    setDraftPhotos(nextPhotos);
+    if (isEditing) {
+      return;
+    }
     await onUpdateTask(task.id, { photos: nextPhotos });
   };
 
@@ -181,15 +286,52 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   };
 
   const saveSignature = async () => {
+    if (isReadOnly) return;
     const canvas = canvasRef.current;
     if (!canvas || !hasDrawnSignature) return;
     const dataUrl = canvas.toDataURL('image/png');
-    await onUpdateTask(task.id, { signature: dataUrl });
+    setDraftSignature(dataUrl);
+    setHasDrawnSignature(false);
+    if (!isEditing) {
+      await onUpdateTask(task.id, { signature: dataUrl });
+    }
   };
 
   const clearSavedSignature = async () => {
+    if (isReadOnly) return;
     clearSignaturePad();
-    await onUpdateTask(task.id, { signature: undefined });
+    setDraftSignature(undefined);
+    setHasDrawnSignature(false);
+    if (!isEditing) {
+      await onUpdateTask(task.id, { signature: undefined });
+    }
+  };
+
+  const handleExportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const draftTask: FacilityTask = {
+        ...task,
+        status: draftStatus,
+        checklist_json: draftChecklist,
+        notes: draftNotes,
+        photos: draftPhotos,
+        signature: draftSignature,
+        completed_at:
+          draftStatus === 'erledigt'
+            ? task.completed_at || new Date().toISOString()
+            : undefined,
+      };
+      const translatedTask = await ensureTaskTranslated(draftTask, language);
+      exportTaskProtocolPDF({
+        task: translatedTask,
+        obj: objectItem,
+        worker: assignee,
+        docLang: docLanguage,
+      });
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   return (
@@ -217,8 +359,14 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               )}
             </div>
             <h2 className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white leading-snug">
-              {task.title}
+              {displayTitle}
             </h2>
+            {isReadOnly && (
+              <span className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                <Lock className="w-3 h-3" />
+                {t('taskModal.readOnlyLocked')}
+              </span>
+            )}
             {task.bin_types && task.bin_types.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {task.bin_types.map((bin) => {
@@ -272,21 +420,27 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {(['offen', 'in_bearbeitung', 'erledigt'] as TaskStatus[]).map((st) => {
-                  const active = task.status === st;
+                  const active = draftStatus === st;
                   return (
                     <button
                       key={st}
                       type="button"
-                      disabled={updatingStatus}
+                      disabled={isReadOnly || savingChanges}
                       onClick={() => handleStatusChange(st)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60 ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                        isReadOnly
+                          ? 'cursor-not-allowed opacity-75'
+                          : 'cursor-pointer disabled:opacity-60'
+                      } ${
                         active
                           ? st === 'erledigt'
-                            ? 'bg-emerald-600 text-white'
+                            ? 'bg-emerald-600 text-white opacity-100'
                             : st === 'in_bearbeitung'
-                              ? 'bg-amber-500 text-slate-950'
-                              : 'bg-red-600 text-white'
-                          : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                              ? 'bg-amber-500 text-slate-950 opacity-100'
+                              : 'bg-red-600 text-white opacity-100'
+                          : isReadOnly
+                            ? 'bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500'
+                            : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                       }`}
                     >
                       {tStatus(st)}
@@ -294,8 +448,12 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   );
                 })}
               </div>
-              {(task.status === 'erledigt' || task.completed_at) && (
-                <div className="mt-2.5 pt-2 border-t border-slate-200/80 dark:border-slate-700/80 text-[11px] text-slate-600 dark:text-slate-300 space-y-0.5 font-mono">
+              {(draftStatus === 'erledigt' || task.completed_at) && (
+                <div
+                  className={`mt-2.5 pt-2 border-t border-slate-200/80 dark:border-slate-700/80 text-[11px] text-slate-600 dark:text-slate-300 space-y-0.5 font-mono ${
+                    draftStatus !== 'erledigt' ? 'opacity-50 line-through' : ''
+                  }`}
+                >
                   {task.completed_at && (
                     <p>
                       <span className="font-sans font-semibold text-emerald-700 dark:text-emerald-400">
@@ -322,13 +480,13 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           </div>
 
           {/* Description */}
-          {task.description && (
+          {displayDescription && (
             <div>
               <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">
                 {t('taskModal.description')}
               </h3>
               <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
-                {task.description}
+                {displayDescription}
               </p>
             </div>
           )}
@@ -342,22 +500,27 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               <span className="font-mono text-xs font-semibold text-slate-500 dark:text-slate-400 tabular-nums">
                 {t('taskModal.checklistProgress', {
                   done: completedChecks,
-                  total: task.checklist_json.length,
+                  total: draftChecklist.length,
                 })}
               </span>
             </div>
 
             <div className="divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-              {task.checklist_json.map((item) => (
+              {draftChecklist.map((item) => (
                 <label
                   key={item.id}
-                  className="flex items-center gap-3 px-3.5 py-3 min-h-[44px] bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors"
+                  className={`flex items-center gap-3 px-3.5 py-3 min-h-[44px] bg-white dark:bg-slate-900 transition-colors ${
+                    isReadOnly
+                      ? 'cursor-default opacity-90'
+                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer'
+                  }`}
                 >
                   <input
                     type="checkbox"
                     checked={item.checked}
+                    disabled={isReadOnly}
                     onChange={() => handleToggleChecklist(item.id)}
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                   />
                   <span
                     className={`text-sm ${
@@ -372,22 +535,24 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               ))}
             </div>
 
-            <form onSubmit={handleAddChecklistItem} className="mt-2.5 flex gap-2">
-              <input
-                type="text"
-                value={newCheckItem}
-                onChange={(e) => setNewCheckItem(e.target.value)}
-                placeholder={t('taskModal.addCheckItem')}
-                className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-orange-500 focus:outline-none"
-              />
-              <button
-                type="submit"
-                className="flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer whitespace-nowrap"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                {t('common.add')}
-              </button>
-            </form>
+            {!isReadOnly && (
+              <form onSubmit={handleAddChecklistItem} className="mt-2.5 flex gap-2">
+                <input
+                  type="text"
+                  value={newCheckItem}
+                  onChange={(e) => setNewCheckItem(e.target.value)}
+                  placeholder={t('taskModal.addCheckItem')}
+                  className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-orange-500 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  className="flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer whitespace-nowrap"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {t('common.add')}
+                </button>
+              </form>
+            )}
           </div>
 
           {/* Berichtnotizen */}
@@ -399,32 +564,31 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               >
                 {t('taskModal.reportNotes')}
               </label>
-              {savedNotice && (
+              {savedNotice ? (
                 <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                   <Check className="w-3.5 h-3.5" />
                   {t('common.saved')}
                 </span>
-              )}
+              ) : draftNotes !== task.notes ? (
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                  {t('taskModal.unsavedChanges')}
+                </span>
+              ) : null}
             </div>
             <textarea
               id="task-notes"
               rows={3}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              value={draftNotes}
+              readOnly={isReadOnly}
+              disabled={isReadOnly}
+              onChange={(e) => setDraftNotes(e.target.value)}
               placeholder={t('taskModal.notesPlaceholder')}
-              className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 text-sm text-slate-900 dark:text-white focus:border-orange-500 focus:outline-none"
+              className={`w-full rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-sm focus:outline-none ${
+                isReadOnly
+                  ? 'bg-slate-50 dark:bg-slate-800/40 text-slate-600 dark:text-slate-300 cursor-not-allowed'
+                  : 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:border-orange-500'
+              }`}
             />
-            <div className="mt-2 flex justify-end">
-              <button
-                type="button"
-                onClick={handleSaveNotes}
-                disabled={savingNotes}
-                className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-white transition-colors cursor-pointer"
-              >
-                <Save className="w-3.5 h-3.5" />
-                {savingNotes ? t('common.saving') : t('taskModal.saveNote')}
-              </button>
-            </div>
           </div>
 
           {/* Photo Documentation with GPS & Timestamp Watermark */}
@@ -432,18 +596,20 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
               <div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  {t('taskModal.photosTitle', { count: task.photos.length })}
+                  {t('taskModal.photosTitle', { count: draftPhotos.length })}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {t('taskModal.photosHint')}
                 </p>
               </div>
-              <PhotoUploadButtons
-                onSelectFile={(file) => handlePhotoUpload(file, false)}
-                loading={uploadingPhoto}
-                loadingLabel={t('common.photoSending')}
-                compact
-              />
+              {!isReadOnly && (
+                <PhotoUploadButtons
+                  onSelectFile={(file) => handlePhotoUpload(file, false)}
+                  loading={uploadingPhoto}
+                  loadingLabel={t('common.photoSending')}
+                  compact
+                />
+              )}
             </div>
 
             {uploadingPhoto && (
@@ -452,13 +618,13 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               </p>
             )}
 
-            {task.photos.length === 0 ? (
+            {draftPhotos.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4 text-center text-xs text-slate-500 dark:text-slate-400">
                 {t('taskModal.noPhotos')}
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {task.photos.map((photo) => (
+                {draftPhotos.map((photo) => (
                   <div
                     key={photo.id}
                     className="group relative rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-800"
@@ -475,14 +641,16 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                         className="w-full h-full object-cover"
                       />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePhoto(photo.id)}
-                      aria-label={t('common.delete')}
-                      className="absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-lg bg-slate-950/75 text-white hover:bg-red-600 transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!isReadOnly && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePhoto(photo.id)}
+                        aria-label={t('common.delete')}
+                        className="absolute top-1.5 right-1.5 flex h-7 w-7 items-center justify-center rounded-lg bg-slate-950/75 text-white hover:bg-red-600 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -498,10 +666,10 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   {t('taskModal.signatureTitle')}
                 </h3>
               </div>
-              {task.signature && (
+              {draftSignature && !isReadOnly && (
                 <button
                   type="button"
-                  onClick={clearSavedSignature}
+                  onClick={() => void clearSavedSignature()}
                   className="text-xs font-medium text-red-600 dark:text-red-400 hover:underline cursor-pointer"
                 >
                   {t('taskModal.resetSignature')}
@@ -509,10 +677,10 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               )}
             </div>
 
-            {task.signature ? (
+            {draftSignature ? (
               <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 flex items-center justify-between gap-4">
                 <img
-                  src={task.signature}
+                  src={draftSignature}
                   alt={t('taskModal.signed')}
                   className="h-16 bg-white rounded-lg border border-slate-200 p-1 object-contain"
                 />
@@ -520,6 +688,10 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   <CheckCircle2 className="w-4 h-4" />
                   {t('taskModal.signed')}
                 </span>
+              </div>
+            ) : isReadOnly ? (
+              <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-4 text-center text-xs text-slate-500 dark:text-slate-400">
+                {t('taskModal.noSignature')}
               </div>
             ) : (
               <div className="space-y-2">
@@ -549,7 +721,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={saveSignature}
+                      onClick={() => void saveSignature()}
                       disabled={!hasDrawnSignature}
                       className="rounded-lg bg-slate-900 dark:bg-orange-500 disabled:opacity-40 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 dark:hover:bg-orange-600 cursor-pointer"
                     >
@@ -564,44 +736,88 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
         {/* Sticky Footer CTA */}
         <div className="px-5 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-          >
-            {t('common.close')}
-          </button>
+          {showEditFooter ? (
+            <>
+              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                {hasUnsavedChanges ? t('taskModal.unsavedChanges') : t('taskModal.editModeActive')}
+              </span>
+              <div className="flex flex-wrap items-center gap-2 ml-auto">
+                <button
+                  type="button"
+                  disabled={savingChanges}
+                  onClick={handleCancelChanges}
+                  className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-60 cursor-pointer"
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  disabled={savingChanges}
+                  onClick={() => void handleSaveChanges()}
+                  className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {savingChanges ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  <span>
+                    {savingChanges ? t('common.saving') : t('taskModal.saveChanges')}
+                  </span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                {t('common.close')}
+              </button>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                exportTaskProtocolPDF({
-                  task,
-                  obj: objectItem,
-                  worker: assignee,
-                  docLang: docLanguage,
-                })
-              }
-              className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                task.status === 'erledigt'
-                  ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm'
-                  : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              <span>{t('tasks.pdfProtocol')}</span>
-            </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {task.status === 'erledigt' && (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Pencil className="w-4 h-4 text-orange-500" />
+                    <span>{t('taskModal.edit')}</span>
+                  </button>
+                )}
 
-            {task.status !== 'erledigt' && (
-              <PhotoUploadButtons
-                onSelectFile={(file) => handlePhotoUpload(file, true)}
-                loading={uploadingPhoto}
-                loadingLabel={t('common.photoSending')}
-                variant="emerald"
-              />
-            )}
-          </div>
+                <button
+                  type="button"
+                  disabled={exportingPdf}
+                  onClick={() => void handleExportPdf()}
+                  className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60 ${
+                    task.status === 'erledigt'
+                      ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm'
+                      : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  {exportingPdf ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FileText className="w-4 h-4" />
+                  )}
+                  <span>{t('tasks.pdfProtocol')}</span>
+                </button>
+
+                {task.status !== 'erledigt' && (
+                  <PhotoUploadButtons
+                    onSelectFile={(file) => handlePhotoUpload(file, true)}
+                    loading={uploadingPhoto}
+                    loadingLabel={t('common.photoSending')}
+                    variant="emerald"
+                  />
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -627,6 +843,20 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             />
           </div>
         </div>
+      )}
+      {/* Reopen Completed Task Confirmation */}
+      {pendingReopenStatus && (
+        <ConfirmDialog
+          title={t('confirm.reopenTaskTitle')}
+          message={t('confirm.reopenTaskMessage')}
+          detail={displayTitle}
+          confirmLabel={t('confirm.reopenTaskConfirm')}
+          onConfirm={() => {
+            setDraftStatus(pendingReopenStatus);
+            setPendingReopenStatus(null);
+          }}
+          onCancel={() => setPendingReopenStatus(null)}
+        />
       )}
     </div>
   );

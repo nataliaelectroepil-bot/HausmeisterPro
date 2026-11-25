@@ -5,10 +5,12 @@ import {
   ClipboardCheck,
   Clock,
   FileText,
+  Loader2,
   MapPin,
   Search,
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useTaskTranslation } from '../i18n/TaskTranslationContext';
 import {
   FacilityTask,
   PropertyObject,
@@ -20,7 +22,7 @@ import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { BIN_VISUAL_META } from '../utils/binMeta';
 import { exportTaskProtocolPDF } from '../utils/pdfExport';
-import { PhotoUploadButtons } from './PhotoUploadButtons';
+import { CompleteTaskModal } from './CompleteTaskModal';
 
 interface TasksTabProps {
   tasks: FacilityTask[];
@@ -31,6 +33,7 @@ interface TasksTabProps {
     task: FacilityTask,
     photo: Awaited<ReturnType<typeof createWatermarkedPhoto>>
   ) => Promise<void>;
+  onCompleteWithoutPhoto: (task: FacilityTask) => Promise<void>;
 }
 
 const CATEGORY_FILTERS: Array<'Alle' | TaskCategory> = [
@@ -48,12 +51,17 @@ export const TasksTab: React.FC<TasksTabProps> = ({
   users,
   onOpenTaskDetail,
   onQuickCompleteWithPhoto,
+  onCompleteWithoutPhoto,
 }) => {
-  const { t, tCategory, tStatus, tPriority, tBin, docLanguage } = useTranslation();
+  const { t, tCategory, tStatus, tPriority, tBin, docLanguage, language, locale } = useTranslation();
+  const { getTaskTitle, getTaskDescription, ensureTaskTranslated } = useTaskTranslation();
   const [selectedCategory, setSelectedCategory] = useState<'Alle' | TaskCategory>('Alle');
   const [selectedStatus, setSelectedStatus] = useState<TaskStatus>('offen');
   const [searchQuery, setSearchQuery] = useState('');
-  const [uploadingTaskId, setUploadingTaskId] = useState<string | null>(null);
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const [completeModalTask, setCompleteModalTask] = useState<FacilityTask | null>(null);
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  const [exportingPdfId, setExportingPdfId] = useState<string | null>(null);
 
   const categoryFiltered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -61,14 +69,18 @@ export const TasksTab: React.FC<TasksTabProps> = ({
       if (selectedCategory !== 'Alle' && tItem.category !== selectedCategory) return false;
       if (!q) return true;
       const obj = objects.find((o) => o.id === tItem.object_id);
+      const trTitle = getTaskTitle(tItem).toLowerCase();
+      const trDesc = getTaskDescription(tItem).toLowerCase();
       return (
         tItem.title.toLowerCase().includes(q) ||
         tItem.description.toLowerCase().includes(q) ||
+        trTitle.includes(q) ||
+        trDesc.includes(q) ||
         (obj?.name.toLowerCase().includes(q) ?? false) ||
         (obj?.address.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [tasks, objects, selectedCategory, searchQuery]);
+  }, [tasks, objects, selectedCategory, searchQuery, getTaskTitle, getTaskDescription]);
 
   const counts = useMemo(() => {
     return {
@@ -89,17 +101,53 @@ export const TasksTab: React.FC<TasksTabProps> = ({
     task: FacilityTask,
     obj?: PropertyObject
   ) => {
-    setUploadingTaskId(task.id);
+    setCompletingTaskId(task.id);
+    setCompleteError(null);
     try {
       const photo = await createWatermarkedPhoto(file, {
-        objectName: obj?.name ?? t('common.object'),
-        fallbackLat: obj?.lat,
-        fallbackLng: obj?.lng,
-        caption: task.title,
+        objectName: obj?.name ?? (task.address || t('common.object')),
+        fallbackLat: obj?.lat ?? task.lat,
+        fallbackLng: obj?.lng ?? task.lng,
+        caption: getTaskTitle(task),
       });
       await onQuickCompleteWithPhoto(task, photo);
+      setCompleteModalTask(null);
+    } catch (err) {
+      setCompleteError(
+        err instanceof Error ? err.message : 'Foto konnte nicht verarbeitet werden.'
+      );
     } finally {
-      setUploadingTaskId(null);
+      setCompletingTaskId(null);
+    }
+  };
+
+  const handleContinueWithoutPhoto = async (task: FacilityTask) => {
+    setCompletingTaskId(task.id);
+    setCompleteError(null);
+    try {
+      await onCompleteWithoutPhoto(task);
+      setCompleteModalTask(null);
+    } catch (err) {
+      setCompleteError(
+        err instanceof Error ? err.message : 'Aufgabe konnte nicht abgeschlossen werden.'
+      );
+    } finally {
+      setCompletingTaskId(null);
+    }
+  };
+
+  const handleExportPdf = async (task: FacilityTask, obj?: PropertyObject, worker?: User) => {
+    setExportingPdfId(task.id);
+    try {
+      const translatedTask = await ensureTaskTranslated(task, language);
+      exportTaskProtocolPDF({
+        task: translatedTask,
+        obj,
+        worker,
+        docLang: docLanguage,
+      });
+    } finally {
+      setExportingPdfId(null);
     }
   };
 
@@ -258,7 +306,7 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                       <span aria-hidden="true">·</span>
                       <span className="font-mono tabular-nums flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5" />
-                        {formatDateTimeDE(task.due_date)}
+                        {formatDateTimeDE(task.due_date, locale)}
                       </span>
                     </div>
 
@@ -276,8 +324,13 @@ export const TasksTab: React.FC<TasksTabProps> = ({
 
                   {/* Title */}
                   <h3 className="mt-2 font-display text-base font-bold text-slate-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors leading-snug">
-                    {task.title}
+                    {getTaskTitle(task)}
                   </h3>
+                  {task.description && (
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                      {getTaskDescription(task)}
+                    </p>
+                  )}
 
                   {/* Object & Address */}
                   <p className="mt-1.5 text-xs text-slate-600 dark:text-slate-300 flex items-start gap-1.5">
@@ -329,38 +382,59 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                   <div className="flex flex-wrap items-center gap-2 ml-auto">
                     <button
                       type="button"
+                      disabled={exportingPdfId === task.id}
                       onClick={(e) => {
                         e.stopPropagation();
-                        exportTaskProtocolPDF({
-                          task,
-                          obj,
-                          worker,
-                          docLang: docLanguage,
-                        });
+                        void handleExportPdf(task, obj, worker);
                       }}
-                      className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors cursor-pointer min-h-[40px] whitespace-nowrap ${
+                      className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors cursor-pointer min-h-[40px] whitespace-nowrap disabled:opacity-60 ${
                         task.status === 'erledigt'
                           ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm'
                           : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
                       }`}
                     >
-                      <FileText className="w-3.5 h-3.5" />
+                      {exportingPdfId === task.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <FileText className="w-3.5 h-3.5" />
+                      )}
                       <span>{t('tasks.pdfProtocol')}</span>
                     </button>
 
                     {task.status !== 'erledigt' ? (
-                      <PhotoUploadButtons
-                        onSelectFile={(file) => handleQuickPhoto(file, task, obj)}
-                        loading={uploadingTaskId === task.id}
-                        loadingLabel={t('tasks.savingPhoto')}
-                        variant="emerald"
-                        compact
-                      />
+                      <button
+                        type="button"
+                        disabled={completingTaskId === task.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCompleteError(null);
+                          setCompleteModalTask(task);
+                        }}
+                        className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-3.5 py-2 text-xs font-semibold text-white transition-colors cursor-pointer min-h-[40px] whitespace-nowrap"
+                      >
+                        {completingTaskId === task.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        )}
+                        <span>
+                          {completingTaskId === task.id
+                            ? t('tasks.completing')
+                            : t('tasks.completeTask')}
+                        </span>
+                      </button>
                     ) : (
-                      <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-4 h-4" />
-                        {t('common.completed')}
-                      </span>
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 className="w-4 h-4" />
+                          {t('common.completed')}
+                        </span>
+                        {task.completed_at && (
+                          <span className="font-mono text-[11px] font-medium text-emerald-700 dark:text-emerald-300 tabular-nums">
+                            {t('taskModal.completedAtLabel')}: {formatDateTimeDE(task.completed_at, locale)}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -369,6 +443,30 @@ export const TasksTab: React.FC<TasksTabProps> = ({
           })}
         </div>
       )}
+
+      {completeModalTask && (() => {
+        const modalObj = objects.find((o) => o.id === completeModalTask.object_id);
+        return (
+          <CompleteTaskModal
+            taskTitle={getTaskTitle(completeModalTask)}
+            subtitle={modalObj?.name ?? completeModalTask.address}
+            allowWithoutPhoto={true}
+            loading={completingTaskId === completeModalTask.id}
+            error={completeError}
+            onSelectPhoto={(file) =>
+              handleQuickPhoto(file, completeModalTask, modalObj)
+            }
+            onContinueWithoutPhoto={() =>
+              handleContinueWithoutPhoto(completeModalTask)
+            }
+            onClose={() => {
+              if (completingTaskId) return;
+              setCompleteError(null);
+              setCompleteModalTask(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 };
