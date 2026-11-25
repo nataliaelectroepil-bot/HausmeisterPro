@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Camera,
+  Check,
   CheckCircle2,
   CloudSnow,
   FileDown,
@@ -7,6 +9,7 @@ import {
   MapPin,
   Play,
   Thermometer,
+  X,
 } from 'lucide-react';
 import {
   PropertyObject,
@@ -16,11 +19,12 @@ import {
   WinterLog,
 } from '../../types/facility';
 import { formatDateTimeDE, formatTimeDE } from '../../utils/dateUtils';
+import { formatPropertyOptionLabel, getWinterLogActions } from '../../utils/objectUtils';
 import { exportWinterLogPDF } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { captureCurrentGPS, fetchLocalWeather } from '../../utils/weather';
+import { CompleteTaskModal } from '../CompleteTaskModal';
 import { SignaturePad } from '../SignaturePad';
-import { PhotoUploadButtons } from '../PhotoUploadButtons';
 import { useTranslation } from '../../i18n/LanguageContext';
 import { useTaskTranslation } from '../../i18n/TaskTranslationContext';
 
@@ -63,13 +67,15 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
   const [weatherDesc, setWeatherDesc] = useState<string>('Bedeckt');
   const [weatherSource, setWeatherSource] = useState<'open-meteo' | 'fallback'>('open-meteo');
 
-  const [actionType, setActionType] = useState<WinterActionType>('Salz gestreut');
+  const [actionTypes, setActionTypes] = useState<WinterActionType[]>(['Salz gestreut']);
   const [saltKg, setSaltKg] = useState<string>('12');
   const [notes, setNotes] = useState<string>('');
   const [photo, setPhoto] = useState<TaskPhoto | undefined>(undefined);
   const [signature, setSignature] = useState<string | undefined>(undefined);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [photoModalError, setPhotoModalError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -77,6 +83,21 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
   }, [initialObjectId]);
 
   const selectedObject = objects.find((o) => o.id === objectId);
+  const isInspectionOnly =
+    actionTypes.length === 1 && actionTypes[0] === 'Kontrollfahrt ohne Einsatz';
+
+  const toggleAction = (act: WinterActionType) => {
+    setValidationError(null);
+    setActionTypes((prev) => {
+      if (act === 'Kontrollfahrt ohne Einsatz') {
+        return prev.includes(act) ? [] : ['Kontrollfahrt ohne Einsatz'];
+      }
+      const withoutControl = prev.filter((item) => item !== 'Kontrollfahrt ohne Einsatz');
+      return withoutControl.includes(act)
+        ? withoutControl.filter((item) => item !== act)
+        : [...withoutControl, act];
+    });
+  };
 
   const handleStartSession = async () => {
     if (!selectedObject) return;
@@ -92,6 +113,7 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
       setWeatherDesc(weather.weatherDesc);
       setWeatherSource(weather.source);
       setStartTime(new Date().toISOString());
+      setActionTypes(['Salz gestreut']);
       setPhoto(undefined);
       setSignature(undefined);
       setNotes('');
@@ -104,24 +126,33 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
   const handlePhotoUpload = async (file: File) => {
     if (!selectedObject) return;
     setValidationError(null);
+    setPhotoModalError(null);
     setUploadingPhoto(true);
     try {
+      const actionCaption = actionTypes.join(', ') || 'Winterdienst';
       const watermarked = await createWatermarkedPhoto(file, {
         objectName: selectedObject.name,
         fallbackLat: lat,
         fallbackLng: lng,
-        caption: `Winterdienst Nachher-Foto (${actionType})`,
+        caption: `Winterdienst Nachher-Foto (${actionCaption})`,
         extraStamp: `${tempCelsius.toFixed(1)} °C · ${weatherDesc}`,
       });
       setPhoto(watermarked);
+      setShowPhotoModal(false);
     } catch {
-      setValidationError(t('winter.photoErr'));
+      const errMsg = t('winter.photoErr');
+      setPhotoModalError(errMsg);
+      setValidationError(errMsg);
     } finally {
       setUploadingPhoto(false);
     }
   };
 
   const handleCompleteLog = async (exportImmediately: boolean) => {
+    if (actionTypes.length === 0) {
+      setValidationError(t('winter.actionErr'));
+      return;
+    }
     if (!photo) {
       setValidationError(t('winter.photoErr'));
       return;
@@ -139,8 +170,9 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
         lng,
         temp_celsius: tempCelsius,
         weather_desc: weatherDesc,
-        action_type: actionType,
-        salt_kg: actionType === 'Kontrollfahrt ohne Einsatz' ? 0 : Number(saltKg) || 0,
+        action_type: actionTypes.join(', '),
+        action_types: actionTypes,
+        salt_kg: isInspectionOnly ? 0 : Number(saltKg) || 0,
         photo,
         signature,
         notes: notes.trim(),
@@ -187,7 +219,7 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
             >
               {objects.map((o) => (
                 <option key={o.id} value={o.id}>
-                  {o.name} — {o.address}
+                  {formatPropertyOptionLabel(o)}
                 </option>
               ))}
             </select>
@@ -255,27 +287,37 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
               </div>
             </div>
 
-            {/* Action Selection & Material */}
+            {/* Action Selection (Multi-Select) & Material */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
-                  {t('winter.actionLabel')}
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {ACTIONS.map((act) => (
-                    <button
-                      key={act}
-                      type="button"
-                      onClick={() => setActionType(act)}
-                      className={`rounded-xl border px-3 py-2.5 text-xs font-semibold text-left transition-colors cursor-pointer min-h-[44px] ${
-                        actionType === act
-                          ? 'border-orange-500 bg-orange-500 text-white'
-                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200'
-                      }`}
-                    >
-                      {tWinterAction(act)}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    {t('winter.actionLabel')}
+                  </label>
+                  <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                    {t('winter.multiSelectHint')}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {ACTIONS.map((act) => {
+                    const active = actionTypes.includes(act);
+                    return (
+                      <button
+                        key={act}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => toggleAction(act)}
+                        className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold text-left transition-colors cursor-pointer min-h-[44px] ${
+                          active
+                            ? 'border-orange-500 bg-orange-500 text-white shadow-sm'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-600'
+                        }`}
+                      >
+                        <span>{tWinterAction(act)}</span>
+                        {active && <Check className="w-4 h-4 shrink-0" />}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -287,15 +329,15 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
                   type="number"
                   min="0"
                   step="1"
-                  disabled={actionType === 'Kontrollfahrt ohne Einsatz'}
-                  value={actionType === 'Kontrollfahrt ohne Einsatz' ? '0' : saltKg}
+                  disabled={isInspectionOnly || actionTypes.length === 0}
+                  value={isInspectionOnly ? '0' : saltKg}
                   onChange={(e) => setSaltKg(e.target.value)}
                   className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 font-mono text-sm text-slate-900 dark:text-white disabled:opacity-50"
                 />
               </div>
             </div>
 
-            {/* Mandatory Nachher-Foto */}
+            {/* Mandatory Nachher-Foto (Unified Button -> Kamera / Galerie Modal) */}
             <div>
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <div>
@@ -303,20 +345,47 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
                     {t('winter.photoRequiredTitle', { temp: tempCelsius.toFixed(1) })}
                   </p>
                 </div>
-                <PhotoUploadButtons
-                  compact
-                  loading={uploadingPhoto}
-                  onSelectFile={handlePhotoUpload}
-                />
+                <button
+                  type="button"
+                  disabled={uploadingPhoto}
+                  onClick={() => {
+                    setPhotoModalError(null);
+                    setShowPhotoModal(true);
+                  }}
+                  className="flex items-center justify-center gap-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-60 px-3.5 py-2 text-xs font-semibold text-white transition-colors cursor-pointer min-h-[40px] whitespace-nowrap"
+                >
+                  {uploadingPhoto ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  ) : (
+                    <Camera className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>
+                    {uploadingPhoto
+                      ? t('common.photoSending')
+                      : photo
+                        ? t('winter.photoReplace')
+                        : t('winter.photoAdd')}
+                  </span>
+                </button>
               </div>
 
               {photo && (
-                <img
-                  src={photo.dataUrl}
-                  alt={t('winter.photoTake')}
-                  referrerPolicy="no-referrer"
-                  className="w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-700 object-cover max-h-64"
-                />
+                <div className="relative inline-block w-full max-w-md">
+                  <img
+                    src={photo.dataUrl}
+                    alt={t('winter.photoTake')}
+                    referrerPolicy="no-referrer"
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-700 object-cover max-h-64"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPhoto(undefined)}
+                    aria-label={t('common.close')}
+                    className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-lg bg-slate-950/75 text-white hover:bg-red-600 transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               )}
             </div>
 
@@ -408,7 +477,10 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
                     <span>{log.weather_desc}</span>
                   </div>
                   <p className="text-sm font-bold text-slate-900 dark:text-white">
-                    {obj?.name ?? t('common.object')} — {tWinterAction(log.action_type)}
+                    {obj?.name ?? t('common.object')} —{' '}
+                    {getWinterLogActions(log)
+                      .map((act) => tWinterAction(act))
+                      .join(', ')}
                     {log.salt_kg > 0 ? ` (${log.salt_kg} kg)` : ''}
                   </p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -444,6 +516,29 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
           })}
         </div>
       </div>
+
+      {/* Photo Source Choice Modal (Camera vs Gallery) */}
+      {showPhotoModal && (
+        <CompleteTaskModal
+          title={t('winter.photoAdd')}
+          hint={t('winter.photoModalHint')}
+          taskTitle={selectedObject?.name ?? t('winter.title')}
+          subtitle={
+            actionTypes.length > 0
+              ? actionTypes.map((a) => tWinterAction(a)).join(', ')
+              : undefined
+          }
+          allowWithoutPhoto={false}
+          loading={uploadingPhoto}
+          error={photoModalError}
+          onSelectPhoto={handlePhotoUpload}
+          onClose={() => {
+            if (uploadingPhoto) return;
+            setPhotoModalError(null);
+            setShowPhotoModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };

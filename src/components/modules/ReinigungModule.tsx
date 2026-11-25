@@ -15,6 +15,7 @@ import {
   User,
 } from '../../types/facility';
 import { formatDateTimeDE } from '../../utils/dateUtils';
+import { formatPropertyOptionLabel } from '../../utils/objectUtils';
 import { exportCleaningReportPDF } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { captureCurrentGPS } from '../../utils/weather';
@@ -192,7 +193,7 @@ export const ReinigungModule: React.FC<ReinigungModuleProps> = ({
             >
               {objects.map((o) => (
                 <option key={o.id} value={o.id}>
-                  {o.name} — {o.address}
+                  {formatPropertyOptionLabel(o)}
                 </option>
               ))}
             </select>

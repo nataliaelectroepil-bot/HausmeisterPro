@@ -25,6 +25,7 @@ import {
   formatMinutesAsHoursDE,
   formatTimeDE,
 } from './dateUtils';
+import { getWinterLogActions } from './objectUtils';
 
 function safePdfText(input: string, docLang: DocLanguageCode): string {
   if (docLang !== 'HR') return input;
@@ -364,37 +365,60 @@ export function exportWinterLogPDF({
   );
 
   // Action & Material Box
+  const actionsList = getWinterLogActions(log);
+  const actionText = actionsList
+    .map((act) => WINTER_ACTION_LABELS[act]?.[docLang] ?? act)
+    .join(', ');
+  const actionValueWidth = pageWidth - 16 - 76 - 4;
+  const preparedAction = prepareSmartText(doc, actionText, actionValueWidth, 10, 'normal');
+  const extraActionH = Math.max(0, preparedAction.lines.length - 1) * 5;
+  const actionBoxHeight = 34 + extraActionH;
+
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(16, 94, pageWidth - 32, 34, 2, 2, 'FD');
+  doc.roundedRect(16, 94, pageWidth - 32, actionBoxHeight, 2, 2, 'FD');
 
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
   doc.text(safePdfText(L.actionTaken, docLang), 22, 103);
-  doc.text(safePdfText(L.materialUsed, docLang), 22, 111);
-  doc.text(safePdfText(L.crew, docLang), 22, 119);
+  doc.text(safePdfText(L.materialUsed, docLang), 22, 111 + extraActionH);
+  doc.text(safePdfText(L.crew, docLang), 22, 119 + extraActionH);
 
-  const actionText = WINTER_ACTION_LABELS[log.action_type]?.[docLang] ?? log.action_type;
+  renderSmartLines(
+    doc,
+    preparedAction,
+    76,
+    103,
+    actionValueWidth,
+    10,
+    'normal',
+    [15, 23, 42],
+    5
+  );
   doc.setFont('helvetica', 'normal');
-  doc.text(safePdfText(actionText, docLang), 76, 103);
-  doc.text(`${log.salt_kg} kg`, 76, 111);
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${log.salt_kg} kg`, 76, 111 + extraActionH);
   doc.text(
     safePdfText(
       worker ? `${worker.name} (${worker.employee_id})` : L.fieldStaff,
       docLang
     ),
     76,
-    119
+    119 + extraActionH
   );
 
+  const remarksBaseY = 136 + extraActionH;
   if (log.notes) {
     doc.setFont('helvetica', 'bold');
-    doc.text(safePdfText(L.remarks, docLang), 16, 136);
+    doc.text(safePdfText(L.remarks, docLang), 16, remarksBaseY);
     const preparedNotes = prepareSmartText(doc, log.notes, pageWidth - 32, 9.5, 'normal');
     renderSmartLines(
       doc,
       { ...preparedNotes, lines: preparedNotes.lines.slice(0, 2) },
       16,
-      142,
+      remarksBaseY + 6,
       pageWidth - 32,
       9.5,
       'normal',
@@ -404,24 +428,25 @@ export function exportWinterLogPDF({
   }
 
   // Photo Proof
-  let yAfterPhoto = 152;
+  const photoStartY = 152 + extraActionH;
+  let yAfterPhoto = photoStartY;
   if (log.photo?.dataUrl) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text(safePdfText(L.photoProofTitle, docLang), 16, 152);
+    doc.text(safePdfText(L.photoProofTitle, docLang), 16, photoStartY);
     try {
-      doc.addImage(log.photo.dataUrl, 'JPEG', 16, 156, 115, 68);
-      yAfterPhoto = 232;
+      doc.addImage(log.photo.dataUrl, 'JPEG', 16, photoStartY + 4, 115, 68);
+      yAfterPhoto = photoStartY + 80;
     } catch {
       doc.setFont('helvetica', 'normal');
-      doc.text(safePdfText(L.photoEmbedErr, docLang), 16, 160);
-      yAfterPhoto = 172;
+      doc.text(safePdfText(L.photoEmbedErr, docLang), 16, photoStartY + 8);
+      yAfterPhoto = photoStartY + 20;
     }
   } else {
     doc.setFont('helvetica', 'italic');
     doc.setTextColor(100, 116, 139);
-    doc.text(safePdfText(L.noPhotoAttached, docLang), 16, 156);
-    yAfterPhoto = 170;
+    doc.text(safePdfText(L.noPhotoAttached, docLang), 16, photoStartY + 4);
+    yAfterPhoto = photoStartY + 18;
   }
 
   // Signature
@@ -548,7 +573,13 @@ export function exportHandoverProtocolPDF({
   doc.text(safePdfText(L.tenant, docLang), 21, 69);
 
   doc.setFont('helvetica', 'normal');
-  doc.text(safePdfText(`${obj?.name ?? '—'} · ${obj?.address ?? ''}`, docLang), 56, 48);
+  const handoverObjDisplay =
+    obj?.name &&
+    obj?.address &&
+    obj.name.trim().toLowerCase() === obj.address.trim().toLowerCase()
+      ? obj.address
+      : `${obj?.name ?? '—'}${obj?.address ? ` · ${obj.address}` : ''}`;
+  doc.text(safePdfText(handoverObjDisplay, docLang), 56, 48);
   doc.text(safePdfText(`${typeLabel} · ${L.aptWord} ${protocol.apartment}`, docLang), 56, 55);
   doc.text(safePdfText(protocol.landlord_name, docLang), 56, 62);
   doc.text(

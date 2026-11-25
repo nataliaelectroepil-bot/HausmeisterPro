@@ -149,7 +149,8 @@ export interface WinterLog {
   lng: number;
   temp_celsius: number;
   weather_desc: string;
-  action_type: WinterActionType;
+  action_type: WinterActionType | string;
+  action_types?: WinterActionType[];
   salt_kg: number;
   photo?: TaskPhoto;
   signature?: string;

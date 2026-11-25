@@ -25,6 +25,7 @@ import {
 import { BIN_TYPE_ORDER, BIN_VISUAL_META } from '../utils/binMeta';
 import { getTodayISODate } from '../utils/dateUtils';
 import { reverseGeocodeCoordinates, searchAddressCoordinates } from '../utils/geocoding';
+import { formatPropertyOptionLabel } from '../utils/objectUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { PhotoUploadButtons } from './PhotoUploadButtons';
 
@@ -457,10 +458,27 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         taskLng = coords.lng;
 
         const matchingObj = objects.find(
-          (o) => o.address.trim().toLowerCase() === cleanAddr.toLowerCase()
+          (o) =>
+            o.address.trim().toLowerCase() === cleanAddr.toLowerCase() ||
+            o.name.trim().toLowerCase() === cleanAddr.toLowerCase()
         );
         if (matchingObj) {
           finalObjectId = matchingObj.id;
+        } else if (manualCoordsSource === 'gps') {
+          const clientUser = users.find((u) => u.role === 'client_hausverwaltung');
+          const createdObj = await onCreateObject({
+            name: cleanAddr,
+            address: cleanAddr,
+            lat: coords.lat,
+            lng: coords.lng,
+            client_id: clientUser?.id ?? '',
+            client_name: clientUser?.region || '',
+            units_count: 1,
+          });
+          finalObjectId = createdObj.id;
+          taskAddress = createdObj.address;
+          taskLat = createdObj.lat;
+          taskLng = createdObj.lng;
         }
       } else if (addressMode === 'newObject') {
         const cleanAddr = newObjAddress.trim();
@@ -524,7 +542,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         ) {
           const clientUser = users.find((u) => u.role === 'client_hausverwaltung');
           const createdObj = await onCreateObject({
-            name: resolvedTitle || taskAddress,
+            name: taskAddress,
             address: taskAddress,
             lat: taskLat,
             lng: taskLng,
@@ -748,7 +766,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 >
                   {objects.map((o) => (
                     <option key={o.id} value={o.id}>
-                      {o.name} — {o.address}
+                      {formatPropertyOptionLabel(o)}
                     </option>
                   ))}
                 </select>
