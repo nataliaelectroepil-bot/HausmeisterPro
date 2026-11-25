@@ -87,6 +87,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [selectedBinTypes, setSelectedBinTypes] = useState<BinType[]>([]);
   const [binValidationError, setBinValidationError] = useState(false);
   const [title, setTitle] = useState('');
+  const [isTitleManuallyEdited, setIsTitleManuallyEdited] = useState(false);
   const [description, setDescription] = useState('');
   const [addressMode, setAddressMode] = useState<'existing' | 'manual' | 'newObject'>(
     objects.length > 0 ? 'existing' : 'manual'
@@ -364,13 +365,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   };
 
-  const toggleBinType = (bin: BinType) => {
-    setBinValidationError(false);
-    setSelectedBinTypes((prev) =>
-      prev.includes(bin) ? prev.filter((item) => item !== bin) : [...prev, bin]
-    );
-  };
-
   const getBinOptionLabel = (bin: BinType): string => {
     switch (bin) {
       case 'Restmüll':
@@ -384,14 +378,34 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   };
 
+  const buildBinAutoTitle = (bins: BinType[]): string =>
+    bins.map((bin) => getBinOptionLabel(bin)).join(', ');
+
+  const binFallbackTitle =
+    category === 'Mülltonnendienst' ? buildBinAutoTitle(selectedBinTypes) : '';
+  const effectiveTitle = title.trim() || binFallbackTitle;
+
+  const toggleBinType = (bin: BinType) => {
+    setBinValidationError(false);
+    const nextBins = selectedBinTypes.includes(bin)
+      ? selectedBinTypes.filter((item) => item !== bin)
+      : [...selectedBinTypes, bin];
+    setSelectedBinTypes(nextBins);
+    if (!isTitleManuallyEdited || !title.trim()) {
+      setTitle(buildBinAutoTitle(nextBins));
+      setIsTitleManuallyEdited(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setModalError(null);
-    if (!title.trim()) return;
     if (category === 'Mülltonnendienst' && selectedBinTypes.length === 0) {
       setBinValidationError(true);
       return;
     }
+    const resolvedTitle = effectiveTitle;
+    if (!resolvedTitle) return;
 
     if (addressMode === 'existing' && !objectId) {
       setModalError(t('createTask.addrRequired'));
@@ -478,7 +492,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       }
 
       const taskPayload: Omit<FacilityTask, 'id' | 'created_at'> = {
-        title: title.trim(),
+        title: resolvedTitle,
         description: description.trim(),
         category,
         status: 'offen',
@@ -510,7 +524,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         ) {
           const clientUser = users.find((u) => u.role === 'client_hausverwaltung');
           const createdObj = await onCreateObject({
-            name: title.trim() || taskAddress,
+            name: resolvedTitle || taskAddress,
             address: taskAddress,
             lat: taskLat,
             lng: taskLng,
@@ -568,6 +582,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                   onClick={() => {
                     setCategory(cat);
                     setBinValidationError(false);
+                    if (!isTitleManuallyEdited) {
+                      setTitle(
+                        cat === 'Mülltonnendienst' ? buildBinAutoTitle(selectedBinTypes) : ''
+                      );
+                    }
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                     category === cat
@@ -645,10 +664,14 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             <input
               id="new-task-title"
               type="text"
-              required
+              required={!(category === 'Mülltonnendienst' && selectedBinTypes.length > 0)}
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={t('createTask.taskTitlePlaceholder')}
+              onChange={(e) => {
+                const val = e.target.value;
+                setTitle(val);
+                setIsTitleManuallyEdited(val.trim().length > 0);
+              }}
+              placeholder={binFallbackTitle || t('createTask.taskTitlePlaceholder')}
               className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-orange-500 focus:outline-none"
             />
           </div>
@@ -1159,7 +1182,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               type="submit"
               disabled={
                 submitting ||
-                !title.trim() ||
+                !effectiveTitle ||
                 (addressMode === 'existing' && !objectId) ||
                 (addressMode === 'manual' && !manualAddress.trim()) ||
                 (addressMode === 'newObject' && !newObjAddress.trim()) ||
