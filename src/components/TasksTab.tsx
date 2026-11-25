@@ -54,7 +54,8 @@ export const TasksTab: React.FC<TasksTabProps> = ({
   onCompleteWithoutPhoto,
 }) => {
   const { t, tCategory, tStatus, tPriority, tBin, docLanguage, language, locale } = useTranslation();
-  const { getTaskTitle, getTaskDescription, ensureTaskTranslated } = useTaskTranslation();
+  const { getTaskTitle, getTaskDescription, ensureTaskTranslated, isTranslating } =
+    useTaskTranslation();
   const [selectedCategory, setSelectedCategory] = useState<'Alle' | TaskCategory>('Alle');
   const [selectedStatus, setSelectedStatus] = useState<TaskStatus>('offen');
   const [searchQuery, setSearchQuery] = useState('');
@@ -156,9 +157,21 @@ export const TasksTab: React.FC<TasksTabProps> = ({
       {/* Header & Search */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
-            {t('tasks.title')}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">
+              {t('tasks.title')}
+            </h1>
+            {isTranslating && (
+              <span
+                role="status"
+                aria-live="polite"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-orange-300 dark:border-orange-500/40 bg-orange-50 dark:bg-orange-950/40 px-2.5 py-0.5 text-xs font-semibold text-orange-700 dark:text-orange-300"
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                <span>{t('common.translating')}</span>
+              </span>
+            )}
+          </div>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
             {t('tasks.subtitle')}
           </p>

@@ -108,13 +108,24 @@ async function requestTranslationsFromApi(
     body: JSON.stringify({ targetLanguage, texts }),
   });
   if (!res.ok) {
-    throw new Error(`Translation request failed (${res.status})`);
+    let detail = `HTTP ${res.status}`;
+    try {
+      const errBody = (await res.json()) as { error?: string };
+      if (errBody?.error) {
+        detail = errBody.error;
+      }
+    } catch {
+      // ignore non-JSON error body
+    }
+    throw new Error(`Übersetzung fehlgeschlagen (${detail})`);
   }
   const data = (await res.json()) as { translations?: Record<string, string> };
   return data.translations && typeof data.translations === 'object' ? data.translations : {};
 }
 
 interface TaskTranslationContextValue {
+  isTranslating: boolean;
+  translationError: string | null;
   translateText: (text?: string, langOverride?: LanguageCode) => string;
   getTaskTitle: (
     task: Pick<FacilityTask, 'title' | 'translations'>,
@@ -155,6 +166,7 @@ interface TaskTranslationProviderProps {
   onSyncTaskTranslations?: (
     updates: Array<{ id: string; translations: Record<string, TaskLocalizedContent> }>
   ) => void;
+  onTranslationError?: (message: string | null) => void;
   children: React.ReactNode;
 }
 
@@ -165,6 +177,7 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
   cleaningLogs = [],
   gardenLogs = [],
   onSyncTaskTranslations,
+  onTranslationError,
   children,
 }) => {
   const { language } = useTranslation();
@@ -174,10 +187,18 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
   const failedAtRef = useRef<Map<string, number>>(new Map());
   const dynamicTextsRef = useRef<Set<string>>(new Set());
   const [dynamicVersion, setDynamicVersion] = useState(0);
+  const [activeBatches, setActiveBatches] = useState(0);
+  const [translationError, setTranslationError] = useState<string | null>(null);
 
   useEffect(() => {
     cacheRef.current = cache;
   }, [cache]);
+
+  // Clear temporary retry cooldown whenever the user actively switches language
+  useEffect(() => {
+    failedAtRef.current.clear();
+    setTranslationError(null);
+  }, [language]);
 
   const mergeTranslations = useCallback(
     (targetLang: LanguageCode, incoming: Record<string, string>) => {
@@ -367,7 +388,7 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
 
   // Automatically translate all uncached user-generated texts (tasks, checklists, notes, protocols)
   useEffect(() => {
-    let cancelled = false;
+    const reqLang = language;
     const now = Date.now();
     const pendingTexts: string[] = [];
     const seen = new Set<string>();
@@ -379,18 +400,18 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
       if (seen.has(trimmed)) return;
       seen.add(trimmed);
 
-      const cacheKey = `${language}::${trimmed}`;
+      const cacheKey = `${reqLang}::${trimmed}`;
       if (cacheRef.current[cacheKey] !== undefined) return;
       if (inFlightKeysRef.current.has(cacheKey)) return;
 
       const lastFailedAt = failedAtRef.current.get(cacheKey);
-      if (lastFailedAt && now - lastFailedAt < 30_000) return;
+      if (lastFailedAt && now - lastFailedAt < 10_000) return;
 
       pendingTexts.push(trimmed);
     };
 
     for (const task of tasks) {
-      const entry = getLangEntry(task, language);
+      const entry = getLangEntry(task, reqLang);
       enqueueIfMissing(
         task.title,
         entry && (!entry._src?.title || entry._src.title === task.title.trim())
@@ -447,30 +468,46 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
 
     if (pendingTexts.length === 0) return;
 
-    const batchKeys = pendingTexts.map((t) => `${language}::${t}`);
-    batchKeys.forEach((k) => inFlightKeysRef.current.add(k));
+    const timer = window.setTimeout(() => {
+      // Re-filter against latest cache/in-flight refs when debounce fires
+      const finalTexts = pendingTexts.filter((t) => {
+        const k = `${reqLang}::${t}`;
+        return cacheRef.current[k] === undefined && !inFlightKeysRef.current.has(k);
+      });
+      if (finalTexts.length === 0) return;
 
-    const run = async () => {
-      try {
-        for (let i = 0; i < pendingTexts.length; i += 30) {
-          if (cancelled) break;
-          const chunk = pendingTexts.slice(i, i + 30);
-          const result = await requestTranslationsFromApi(language, chunk);
-          if (cancelled) break;
-          mergeTranslations(language, result);
+      const batchKeys = finalTexts.map((t) => `${reqLang}::${t}`);
+      batchKeys.forEach((k) => inFlightKeysRef.current.add(k));
+      setActiveBatches((n) => n + 1);
+
+      const run = async () => {
+        try {
+          for (let i = 0; i < finalTexts.length; i += 120) {
+            const chunk = finalTexts.slice(i, i + 120);
+            const result = await requestTranslationsFromApi(reqLang, chunk);
+            mergeTranslations(reqLang, result);
+          }
+          setTranslationError(null);
+          onTranslationError?.(null);
+        } catch (err) {
+          const msg =
+            err instanceof Error ? err.message : 'Übersetzung konnte nicht durchgeführt werden.';
+          console.error('[TaskTranslation]', msg);
+          setTranslationError(msg);
+          onTranslationError?.(msg);
+          const failTs = Date.now();
+          batchKeys.forEach((k) => failedAtRef.current.set(k, failTs));
+        } finally {
+          batchKeys.forEach((k) => inFlightKeysRef.current.delete(k));
+          setActiveBatches((n) => Math.max(0, n - 1));
         }
-      } catch {
-        const failTs = Date.now();
-        batchKeys.forEach((k) => failedAtRef.current.set(k, failTs));
-      } finally {
-        batchKeys.forEach((k) => inFlightKeysRef.current.delete(k));
-      }
-    };
+      };
 
-    void run();
+      void run();
+    }, 180);
 
     return () => {
-      cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [
     tasks,
@@ -481,6 +518,7 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
     dynamicVersion,
     language,
     mergeTranslations,
+    onTranslationError,
   ]);
 
   const translateText = useCallback(
@@ -584,14 +622,23 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
       );
 
       if (toFetch.length > 0) {
+        setActiveBatches((n) => n + 1);
         try {
-          for (let i = 0; i < toFetch.length; i += 30) {
-            const chunk = toFetch.slice(i, i + 30);
+          for (let i = 0; i < toFetch.length; i += 120) {
+            const chunk = toFetch.slice(i, i + 120);
             const result = await requestTranslationsFromApi(targetLang, chunk);
             mergeTranslations(targetLang, result);
           }
-        } catch {
-          // Gracefully fall back to original text if translation service is unavailable
+          setTranslationError(null);
+          onTranslationError?.(null);
+        } catch (err) {
+          const msg =
+            err instanceof Error ? err.message : 'Übersetzung konnte nicht durchgeführt werden.';
+          console.error('[TaskTranslation]', msg, err);
+          setTranslationError(msg);
+          onTranslationError?.(msg);
+        } finally {
+          setActiveBatches((n) => Math.max(0, n - 1));
         }
       }
 
@@ -601,7 +648,7 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
       }
       return out;
     },
-    [language, mergeTranslations]
+    [language, mergeTranslations, onTranslationError]
   );
 
   const ensureTaskTranslated = useCallback(
@@ -642,14 +689,23 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
       }
 
       if (toFetch.length > 0) {
+        setActiveBatches((n) => n + 1);
         try {
-          for (let i = 0; i < toFetch.length; i += 30) {
-            const chunk = toFetch.slice(i, i + 30);
+          for (let i = 0; i < toFetch.length; i += 120) {
+            const chunk = toFetch.slice(i, i + 120);
             const result = await requestTranslationsFromApi(targetLang, chunk);
             mergeTranslations(targetLang, result);
           }
-        } catch {
-          // Gracefully fall back to original text if translation service is unavailable
+          setTranslationError(null);
+          onTranslationError?.(null);
+        } catch (err) {
+          const msg =
+            err instanceof Error ? err.message : 'Übersetzung konnte nicht durchgeführt werden.';
+          console.error('[TaskTranslation]', msg, err);
+          setTranslationError(msg);
+          onTranslationError?.(msg);
+        } finally {
+          setActiveBatches((n) => Math.max(0, n - 1));
         }
       }
 
@@ -722,11 +778,15 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
         },
       };
     },
-    [language, mergeTranslations]
+    [language, mergeTranslations, onTranslationError]
   );
+
+  const isTranslating = activeBatches > 0;
 
   const value = useMemo<TaskTranslationContextValue>(
     () => ({
+      isTranslating,
+      translationError,
       translateText,
       getTaskTitle,
       getTaskDescription,
@@ -737,6 +797,8 @@ export const TaskTranslationProvider: React.FC<TaskTranslationProviderProps> = (
       registerDynamicTexts,
     }),
     [
+      isTranslating,
+      translationError,
       translateText,
       getTaskTitle,
       getTaskDescription,

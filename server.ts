@@ -320,7 +320,7 @@ async function startServer(): Promise<void> {
       if (!trimmed || trimmed.length > 2000 || seen.has(trimmed)) continue;
       seen.add(trimmed);
       uniqueTexts.push(trimmed);
-      if (uniqueTexts.length >= 40) break;
+      if (uniqueTexts.length >= 150) break;
     }
 
     if (uniqueTexts.length === 0) {
@@ -348,38 +348,103 @@ async function startServer(): Promise<void> {
 
     const ai = getGeminiClient();
     if (!ai) {
+      console.error('[translate/tasks] GEMINI_API_KEY is not configured on the server.');
       res.status(503).json({ error: 'GEMINI_API_KEY_NOT_CONFIGURED' });
       return;
     }
 
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
-        contents: JSON.stringify(pending),
-        config: {
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          systemInstruction:
-            `You are a precise translator for a German/European property management and facility maintenance (Hausmeister) application. ` +
-            `Translate each input "text" from whatever language it is written in (e.g. Croatian, Serbian, Bosnian, German, English, Albanian, Polish, Turkish, Russian) into ${targetLanguageName}. ` +
-            `If an input string is already clearly written in ${targetLanguageName}, return it unchanged. ` +
-            `CRITICAL: Do NOT translate proper names of people (e.g. "Sandokan Mcroar", "Lukas Wagner", "Anna-Lena Hoffmann"), company names, property/building identifiers (e.g. "WEG An der Feuerwache 2, 48329 Havixbeck"), street addresses, postal codes, city names, unit numbers, access codes, meter IDs, measurements, or numbers — preserve them verbatim. ` +
-            `Keep translations concise, natural, and accurate for work orders, checklists, report notes, and room inspection notes.`,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                index: { type: Type.INTEGER },
-                translated: { type: Type.STRING },
-              },
-              required: ['index', 'translated'],
-            },
-          },
-        },
-      });
+    const systemInstruction =
+      `You are a precise translator for a German/European property management and facility maintenance (Hausmeister) application. ` +
+      `Translate each input "text" from whatever language it is written in (e.g. Croatian, Serbian, Bosnian, German, English, Albanian, Polish, Turkish, Russian) into ${targetLanguageName}. ` +
+      `If an input string is already clearly written in ${targetLanguageName}, return it unchanged. ` +
+      `CRITICAL: Do NOT translate proper names of people (e.g. "Sandokan Mcroar", "Lukas Wagner", "Anna-Lena Hoffmann"), company names, property/building identifiers (e.g. "WEG An der Feuerwache 2, 48329 Havixbeck"), street addresses, postal codes, city names, unit numbers, access codes, meter IDs, measurements, or numbers — preserve them verbatim. ` +
+      `Keep translations concise, natural, and accurate for work orders, checklists, report notes, and room inspection notes.`;
 
-      const rawJson = (response.text ?? '[]').trim();
+    const responseSchema = {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          index: { type: Type.INTEGER },
+          translated: { type: Type.STRING },
+        },
+        required: ['index', 'translated'],
+      },
+    };
+
+    const modelAttempts: Array<{ model: string; thinkingLevel?: ThinkingLevel }> = [
+      { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+      { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+    ];
+
+    const attemptErrors: string[] = [];
+    let rawJson: string | null = null;
+    let lastStatus = 502;
+
+    for (const attempt of modelAttempts) {
+      for (let retry = 0; retry < 3; retry++) {
+        try {
+          const response = await ai.models.generateContent({
+            model: attempt.model,
+            contents: JSON.stringify(pending),
+            config: {
+              ...(attempt.thinkingLevel
+                ? { thinkingConfig: { thinkingLevel: attempt.thinkingLevel } }
+                : {}),
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema,
+            },
+          });
+          rawJson = (response.text ?? '[]').trim();
+          break;
+        } catch (err) {
+          const rawMsg = err instanceof Error ? err.message : String(err);
+          let readableMsg = rawMsg;
+          let errCode = 502;
+          try {
+            const parsedErr = JSON.parse(rawMsg) as {
+              error?: { code?: number; message?: string; status?: string };
+            };
+            if (parsedErr?.error?.message) {
+              readableMsg = parsedErr.error.message;
+              errCode = parsedErr.error.code || 502;
+            }
+          } catch {
+            // keep rawMsg
+          }
+          lastStatus = errCode === 429 ? 429 : errCode === 503 ? 503 : 502;
+          attemptErrors.push(`${attempt.model}: ${readableMsg}`);
+          console.error(`[translate/tasks] ${attempt.model} attempt ${retry + 1} failed:`, readableMsg);
+
+          const isTransient503 = /503|UNAVAILABLE|high demand|overloaded/i.test(rawMsg);
+          if (isTransient503 && retry < 2) {
+            await new Promise((r) => setTimeout(r, 600 * (retry + 1)));
+            continue;
+          }
+          break;
+        }
+      }
+      if (rawJson !== null) break;
+    }
+
+    if (rawJson === null) {
+      const joined = attemptErrors.join(' | ');
+      const isQuota = lastStatus === 429 || /RESOURCE_EXHAUSTED|quota/i.test(joined);
+      const isOverload = lastStatus === 503 || /503|UNAVAILABLE|high demand/i.test(joined);
+      const summary = isQuota
+        ? 'Gemini API Tageslimit (Free Tier) erreicht. Bitte einen API-Key mit Billing in Settings > Secrets hinterlegen oder später erneut versuchen.'
+        : isOverload
+          ? 'Gemini Übersetzungsdienst ist aktuell ausgelastet (503). Bitte in wenigen Sekunden erneut versuchen.'
+          : attemptErrors[attemptErrors.length - 1] || 'TRANSLATION_FAILED';
+      res.status(isQuota ? 429 : isOverload ? 503 : 502).json({
+        error: summary,
+        details: attemptErrors,
+      });
+      return;
+    }
+
+    try {
       const parsed = JSON.parse(rawJson) as Array<{ index?: number; translated?: string }>;
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
@@ -400,7 +465,8 @@ async function startServer(): Promise<void> {
 
       res.json({ translations });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'TRANSLATION_FAILED';
+      const msg = err instanceof Error ? err.message : 'TRANSLATION_PARSE_FAILED';
+      console.error('[translate/tasks] JSON parse error:', msg, rawJson.slice(0, 300));
       res.status(502).json({ error: msg });
     }
   });

@@ -5,6 +5,7 @@ import {
   CheckCheck,
   ChevronDown,
   Globe,
+  Loader2,
   LogOut,
   Moon,
   Plus,
@@ -12,6 +13,7 @@ import {
   Sun,
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useTaskTranslation } from '../i18n/TaskTranslationContext';
 import { SUPPORTED_LANGUAGES } from '../i18n/translations';
 import { ActiveTab, AppNotification, User } from '../types/facility';
 import { formatDateTimeDE } from '../utils/dateUtils';
@@ -43,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
 }) => {
   const { language, setLanguage, t } = useTranslation();
+  const { isTranslating } = useTaskTranslation();
   const [notifOpen, setNotifOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -125,7 +128,17 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Language Switcher Dropdown */}
-        <div className="relative" ref={langPopoverRef}>
+        <div className="relative flex items-center gap-1.5" ref={langPopoverRef}>
+          {isTranslating && (
+            <span
+              role="status"
+              aria-live="polite"
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-orange-500/40 bg-orange-500/15 px-2 py-1 text-[11px] font-semibold text-orange-300 whitespace-nowrap"
+            >
+              <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+              <span>{t('common.translating')}</span>
+            </span>
+          )}
           <button
             type="button"
             onClick={() => setLangOpen((prev) => !prev)}
@@ -133,7 +146,11 @@ export const Header: React.FC<HeaderProps> = ({
             title={t('header.language')}
             className="flex h-8 sm:h-9 items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-1.5 sm:px-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
-            <Globe className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+            {isTranslating ? (
+              <Loader2 className="w-3.5 h-3.5 text-orange-400 animate-spin shrink-0" />
+            ) : (
+              <Globe className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+            )}
             <span className="font-mono tracking-tight">{language}</span>
             <ChevronDown className="hidden sm:block w-3 h-3 text-slate-400 shrink-0" />
           </button>

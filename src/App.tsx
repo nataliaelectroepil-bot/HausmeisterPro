@@ -457,6 +457,7 @@ export default function App() {
         cleaningLogs={cleaningLogs}
         gardenLogs={gardenLogs}
         onSyncTaskTranslations={handleSyncTaskTranslations}
+        onTranslationError={(msg) => setApiError(msg)}
       >
       {apiError && (
         <div
