@@ -50,6 +50,19 @@ export interface TaskPhoto {
   caption?: string;
 }
 
+export interface TaskLocalizedContent {
+  title?: string;
+  description?: string;
+  notes?: string;
+  checklist?: Record<string, string>;
+  _src?: {
+    title?: string;
+    description?: string;
+    notes?: string;
+    checklist?: Record<string, string>;
+  };
+}
+
 export interface FacilityTask {
   id: string;
   title: string;
@@ -73,6 +86,7 @@ export interface FacilityTask {
   completed_lat?: number;
   completed_lng?: number;
   completed_accuracy?: number;
+  translations?: Record<string, TaskLocalizedContent>;
 }
 
 export type BinType = 'Restmüll' | 'Papier' | 'Gelbe Tonne' | 'Bio';

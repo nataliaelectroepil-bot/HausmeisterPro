@@ -47,12 +47,20 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onUpdateTask,
 }) => {
   const { t, tCategory, tStatus, tBin, docLanguage, language } = useTranslation();
-  const { getTaskTitle, getTaskDescription, ensureTaskTranslated } = useTaskTranslation();
+  const {
+    getTaskTitle,
+    getTaskDescription,
+    getTaskNotes,
+    getChecklistItemLabel,
+    translateText,
+    ensureTaskTranslated,
+  } = useTaskTranslation();
   const [draftStatus, setDraftStatus] = useState<TaskStatus>(task.status);
   const [draftChecklist, setDraftChecklist] = useState<ChecklistItem[]>(() =>
     task.checklist_json.map((c) => ({ ...c }))
   );
   const [draftNotes, setDraftNotes] = useState(task.notes);
+  const [notesEditedByUser, setNotesEditedByUser] = useState(false);
   const [draftPhotos, setDraftPhotos] = useState<TaskPhoto[]>(() => [...task.photos]);
   const [draftSignature, setDraftSignature] = useState<string | undefined>(() => task.signature);
   const [isEditing, setIsEditing] = useState(false);
@@ -77,6 +85,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     setDraftStatus(task.status);
     setDraftChecklist(task.checklist_json.map((c) => ({ ...c })));
     setDraftNotes(task.notes);
+    setNotesEditedByUser(false);
     setDraftPhotos([...task.photos]);
     setDraftSignature(task.signature);
     setIsEditing(false);
@@ -102,9 +111,11 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const hasSignatureChanged =
     (draftSignature ?? '') !== (task.signature ?? '') || hasDrawnSignature;
 
+  const notesChanged = notesEditedByUser && draftNotes !== task.notes;
+
   const hasUnsavedChanges =
     draftStatus !== task.status ||
-    draftNotes !== task.notes ||
+    notesChanged ||
     hasChecklistChanged ||
     hasPhotosChanged ||
     hasSignatureChanged;
@@ -151,10 +162,11 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           : undefined;
       const finalSignature = draftSignature ?? pendingDrawnDataUrl;
 
+      const nextNotes = notesEditedByUser ? draftNotes : task.notes;
       await onUpdateTask(task.id, {
         status: draftStatus,
         checklist_json: draftChecklist,
-        notes: draftNotes,
+        notes: nextNotes,
         photos: draftPhotos,
         signature: finalSignature,
         completed_at:
@@ -162,6 +174,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             ? task.completed_at || new Date().toISOString()
             : undefined,
       });
+      setDraftNotes(nextNotes);
+      setNotesEditedByUser(false);
       setDraftSignature(finalSignature);
       setHasDrawnSignature(false);
       setIsEditing(false);
@@ -176,6 +190,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     setDraftStatus(task.status);
     setDraftChecklist(task.checklist_json.map((c) => ({ ...c })));
     setDraftNotes(task.notes);
+    setNotesEditedByUser(false);
     setDraftPhotos([...task.photos]);
     setDraftSignature(task.signature);
     setHasDrawnSignature(false);
@@ -208,7 +223,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
       await onUpdateTask(task.id, {
         photos: nextPhotos,
-        notes: draftNotes,
+        notes: notesEditedByUser ? draftNotes : task.notes,
         checklist_json: draftChecklist,
         ...(markCompleted
           ? { status: 'erledigt', completed_at: task.completed_at || new Date().toISOString() }
@@ -314,7 +329,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         ...task,
         status: draftStatus,
         checklist_json: draftChecklist,
-        notes: draftNotes,
+        notes: notesEditedByUser ? draftNotes : task.notes,
         photos: draftPhotos,
         signature: draftSignature,
         completed_at:
@@ -506,33 +521,40 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </div>
 
             <div className="divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-              {draftChecklist.map((item) => (
-                <label
-                  key={item.id}
-                  className={`flex items-center gap-3 px-3.5 py-3 min-h-[44px] bg-white dark:bg-slate-900 transition-colors ${
-                    isReadOnly
-                      ? 'cursor-default opacity-90'
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={item.checked}
-                    disabled={isReadOnly}
-                    onChange={() => handleToggleChecklist(item.id)}
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-                  />
-                  <span
-                    className={`text-sm ${
-                      item.checked
-                        ? 'line-through text-slate-400 dark:text-slate-500'
-                        : 'text-slate-800 dark:text-slate-100'
+              {draftChecklist.map((item) => {
+                const origItem = task.checklist_json.find((orig) => orig.id === item.id);
+                const displayCheckLabel =
+                  origItem && origItem.label === item.label
+                    ? getChecklistItemLabel(task, item)
+                    : translateText(item.label);
+                return (
+                  <label
+                    key={item.id}
+                    className={`flex items-center gap-3 px-3.5 py-3 min-h-[44px] bg-white dark:bg-slate-900 transition-colors ${
+                      isReadOnly
+                        ? 'cursor-default opacity-90'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer'
                     }`}
                   >
-                    {item.label}
-                  </span>
-                </label>
-              ))}
+                    <input
+                      type="checkbox"
+                      checked={item.checked}
+                      disabled={isReadOnly}
+                      onChange={() => handleToggleChecklist(item.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                    <span
+                      className={`text-sm ${
+                        item.checked
+                          ? 'line-through text-slate-400 dark:text-slate-500'
+                          : 'text-slate-800 dark:text-slate-100'
+                      }`}
+                    >
+                      {displayCheckLabel}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
 
             {!isReadOnly && (
@@ -569,7 +591,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   <Check className="w-3.5 h-3.5" />
                   {t('common.saved')}
                 </span>
-              ) : draftNotes !== task.notes ? (
+              ) : notesChanged ? (
                 <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                   {t('taskModal.unsavedChanges')}
                 </span>
@@ -578,10 +600,13 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             <textarea
               id="task-notes"
               rows={3}
-              value={draftNotes}
+              value={notesEditedByUser ? draftNotes : getTaskNotes(task)}
               readOnly={isReadOnly}
               disabled={isReadOnly}
-              onChange={(e) => setDraftNotes(e.target.value)}
+              onChange={(e) => {
+                setNotesEditedByUser(true);
+                setDraftNotes(e.target.value);
+              }}
               placeholder={t('taskModal.notesPlaceholder')}
               className={`w-full rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-sm focus:outline-none ${
                 isReadOnly

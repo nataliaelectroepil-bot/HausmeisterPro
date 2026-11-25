@@ -389,8 +389,18 @@ export function exportWinterLogPDF({
   if (log.notes) {
     doc.setFont('helvetica', 'bold');
     doc.text(safePdfText(L.remarks, docLang), 16, 136);
-    doc.setFont('helvetica', 'normal');
-    doc.text(doc.splitTextToSize(safePdfText(log.notes, docLang), pageWidth - 32), 16, 142);
+    const preparedNotes = prepareSmartText(doc, log.notes, pageWidth - 32, 9.5, 'normal');
+    renderSmartLines(
+      doc,
+      { ...preparedNotes, lines: preparedNotes.lines.slice(0, 2) },
+      16,
+      142,
+      pageWidth - 32,
+      9.5,
+      'normal',
+      [15, 23, 42],
+      4.5
+    );
   }
 
   // Photo Proof
@@ -1465,15 +1475,23 @@ export function exportTaskProtocolPDF({
     ensurePageSpace(10);
     doc.text(txt(labels.checklist), margin, y);
     y += 5;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
     task.checklist_json.forEach((item) => {
       const checkLine = `${item.checked ? '[x]' : '[ ]'} ${item.label}`;
-      const wrapped = doc.splitTextToSize(txt(checkLine), contentWidth - 4);
-      ensurePageSpace(wrapped.length * 4.4 + 2);
-      doc.setTextColor(item.checked ? 5 : 51, item.checked ? 150 : 65, item.checked ? 105 : 85);
-      doc.text(wrapped, margin + 2, y);
-      y += wrapped.length * 4.4 + 1.2;
+      const preparedCheck = prepareSmartText(doc, checkLine, contentWidth - 4, 9, 'normal');
+      ensurePageSpace(preparedCheck.lines.length * 4.4 + 2);
+      const checkColor: [number, number, number] = item.checked ? [5, 150, 105] : [51, 65, 85];
+      renderSmartLines(
+        doc,
+        preparedCheck,
+        margin + 2,
+        y,
+        contentWidth - 4,
+        9,
+        'normal',
+        checkColor,
+        4.4
+      );
+      y += preparedCheck.lines.length * 4.4 + 1.2;
     });
     y += 3;
   }
@@ -1486,12 +1504,20 @@ export function exportTaskProtocolPDF({
   ensurePageSpace(14);
   doc.text(txt(labels.closingNotes), margin, y);
   y += 5;
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(15, 23, 42);
-  const noteLines = doc.splitTextToSize(txt(notesText), contentWidth);
-  ensurePageSpace(noteLines.length * 4.8 + 6);
-  doc.text(noteLines, margin, y);
-  y += noteLines.length * 4.8 + 6;
+  const preparedNotes = prepareSmartText(doc, notesText, contentWidth, 9.5, 'normal');
+  ensurePageSpace(preparedNotes.lines.length * 4.8 + 6);
+  renderSmartLines(
+    doc,
+    preparedNotes,
+    margin,
+    y,
+    contentWidth,
+    9.5,
+    'normal',
+    [15, 23, 42],
+    4.8
+  );
+  y += preparedNotes.lines.length * 4.8 + 6;
 
   // Section 4: Photo Documentation
   doc.setFontSize(10);

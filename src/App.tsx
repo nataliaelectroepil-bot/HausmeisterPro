@@ -35,6 +35,7 @@ import {
   LanguageCode,
   MeterReading,
   PropertyObject,
+  TaskLocalizedContent,
   TaskPhoto,
   TimeEntry,
   User,
@@ -427,6 +428,21 @@ export default function App() {
     setGardenLogs(updated);
   }, []);
 
+  const handleSyncTaskTranslations = useCallback(
+    (updates: Array<{ id: string; translations: Record<string, TaskLocalizedContent> }>) => {
+      if (updates.length === 0) return;
+      const updateMap = new Map(updates.map((u) => [u.id, u.translations]));
+      setTasks((prev) =>
+        prev.map((t) => {
+          const nextTrans = updateMap.get(t.id);
+          return nextTrans ? { ...t, translations: nextTrans } : t;
+        })
+      );
+      pocketbaseService.cacheTaskTranslationsLocal(updates);
+    },
+    []
+  );
+
   return (
     <LanguageProvider
       language={uiLanguage}
@@ -434,7 +450,14 @@ export default function App() {
       onChangeLanguage={handleChangeLanguage}
       onChangeDocLanguage={handleChangeDocLanguage}
     >
-      <TaskTranslationProvider tasks={tasks}>
+      <TaskTranslationProvider
+        tasks={tasks}
+        protocols={handoverProtocols}
+        winterLogs={winterLogs}
+        cleaningLogs={cleaningLogs}
+        gardenLogs={gardenLogs}
+        onSyncTaskTranslations={handleSyncTaskTranslations}
+      >
       {apiError && (
         <div
           role="alert"

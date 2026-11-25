@@ -21,6 +21,7 @@ import { captureCurrentGPS } from '../../utils/weather';
 import { QRBarcodeScannerModal } from '../QRBarcodeScannerModal';
 import { PhotoUploadButtons } from '../PhotoUploadButtons';
 import { useTranslation } from '../../i18n/LanguageContext';
+import { useTaskTranslation } from '../../i18n/TaskTranslationContext';
 
 interface ReinigungModuleProps {
   objects: PropertyObject[];
@@ -48,6 +49,7 @@ export const ReinigungModule: React.FC<ReinigungModuleProps> = ({
   onCreateLog,
 }) => {
   const { t, tCleaningItem, docLanguage } = useTranslation();
+  const { translateText } = useTaskTranslation();
   const [objectId, setObjectId] = useState<string>(
     initialObjectId || objects[0]?.id || ''
   );
@@ -386,7 +388,7 @@ export const ReinigungModule: React.FC<ReinigungModuleProps> = ({
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {worker?.name ?? t('common.worker')} · {checkedCount}/
                     {log.checklist_json.length} {t('clean.checkpoints')}
-                    {log.notes ? ` · ${log.notes}` : ''}
+                    {log.notes ? ` · ${translateText(log.notes)}` : ''}
                   </p>
                 </div>
 

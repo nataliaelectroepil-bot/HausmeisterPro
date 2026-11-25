@@ -22,6 +22,7 @@ import { captureCurrentGPS, fetchLocalWeather } from '../../utils/weather';
 import { SignaturePad } from '../SignaturePad';
 import { PhotoUploadButtons } from '../PhotoUploadButtons';
 import { useTranslation } from '../../i18n/LanguageContext';
+import { useTaskTranslation } from '../../i18n/TaskTranslationContext';
 
 interface WinterdienstModuleProps {
   objects: PropertyObject[];
@@ -47,7 +48,8 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
   initialObjectId,
   onCreateLog,
 }) => {
-  const { t, tWinterAction, docLanguage } = useTranslation();
+  const { t, tWinterAction, docLanguage, language } = useTranslation();
+  const { translateText, ensureTextsTranslated } = useTaskTranslation();
   const [objectId, setObjectId] = useState<string>(
     initialObjectId || objects[0]?.id || ''
   );
@@ -411,7 +413,7 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
                   </p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {worker?.name ?? t('common.worker')}
-                    {log.notes ? ` · ${log.notes}` : ''}
+                    {log.notes ? ` · ${translateText(log.notes)}` : ''}
                   </p>
                 </div>
 
@@ -423,9 +425,14 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
                   )}
                   <button
                     type="button"
-                    onClick={() =>
-                      exportWinterLogPDF({ log, obj, worker, docLang: docLanguage })
-                    }
+                    onClick={async () => {
+                      let nextLog = log;
+                      if (log.notes?.trim()) {
+                        const map = await ensureTextsTranslated([log.notes], language);
+                        nextLog = { ...log, notes: map[log.notes.trim()] ?? log.notes };
+                      }
+                      exportWinterLogPDF({ log: nextLog, obj, worker, docLang: docLanguage });
+                    }}
                     className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-orange-500 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 cursor-pointer"
                   >
                     <FileDown className="w-3.5 h-3.5 text-orange-500" />

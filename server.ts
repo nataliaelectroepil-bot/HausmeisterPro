@@ -362,8 +362,8 @@ async function startServer(): Promise<void> {
             `You are a precise translator for a German/European property management and facility maintenance (Hausmeister) application. ` +
             `Translate each input "text" from whatever language it is written in (e.g. Croatian, Serbian, Bosnian, German, English, Albanian, Polish, Turkish, Russian) into ${targetLanguageName}. ` +
             `If an input string is already clearly written in ${targetLanguageName}, return it unchanged. ` +
-            `Preserve street names, building names, unit numbers, access codes, measurements, and numbers intact. ` +
-            `Keep translations concise, natural, and accurate for work orders.`,
+            `CRITICAL: Do NOT translate proper names of people (e.g. "Sandokan Mcroar", "Lukas Wagner", "Anna-Lena Hoffmann"), company names, property/building identifiers (e.g. "WEG An der Feuerwache 2, 48329 Havixbeck"), street addresses, postal codes, city names, unit numbers, access codes, meter IDs, measurements, or numbers — preserve them verbatim. ` +
+            `Keep translations concise, natural, and accurate for work orders, checklists, report notes, and room inspection notes.`,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.ARRAY,

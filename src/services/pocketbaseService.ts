@@ -9,6 +9,7 @@ import {
   LanguageCode,
   MeterReading,
   PropertyObject,
+  TaskLocalizedContent,
   TaskPhoto,
   TimeEntry,
   User,
@@ -270,6 +271,10 @@ function normalizeTaskRecord(task: FacilityTask): FacilityTask {
     signature:
       typeof task.signature === 'string' && task.signature.trim()
         ? task.signature
+        : undefined,
+    translations:
+      task.translations && typeof task.translations === 'object' && !Array.isArray(task.translations)
+        ? task.translations
         : undefined,
   };
 }
@@ -1656,6 +1661,31 @@ export const pocketbaseService = {
     });
     writeStorage(STORAGE_KEYS.tasks, updated);
     return updated;
+  },
+
+  cacheTaskTranslationsLocal(
+    updates: Array<{ id: string; translations: Record<string, TaskLocalizedContent> }>
+  ): void {
+    if (updates.length === 0 || this.isPocketBaseEnabled()) return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.tasks);
+      if (!raw) return;
+      const list = JSON.parse(raw) as FacilityTask[];
+      if (!Array.isArray(list)) return;
+      const updateMap = new Map(updates.map((u) => [u.id, u.translations]));
+      let changed = false;
+      const next = list.map((t) => {
+        const nextTrans = updateMap.get(t.id);
+        if (!nextTrans) return t;
+        changed = true;
+        return { ...t, translations: nextTrans };
+      });
+      if (changed) {
+        writeStorage(STORAGE_KEYS.tasks, next);
+      }
+    } catch {
+      // Ignore storage errors safely for translation cache
+    }
   },
 
   async deleteTask(id: string): Promise<FacilityTask[]> {

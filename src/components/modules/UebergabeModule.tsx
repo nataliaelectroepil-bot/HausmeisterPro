@@ -31,6 +31,8 @@ import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { SignaturePad } from '../SignaturePad';
 import { CompleteTaskModal } from '../CompleteTaskModal';
 import { useTranslation } from '../../i18n/LanguageContext';
+import { useTaskTranslation } from '../../i18n/TaskTranslationContext';
+import { ROOM_LABELS } from '../../i18n/translations';
 
 interface UebergabeModuleProps {
   objects: PropertyObject[];
@@ -73,7 +75,8 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
   onCreateProtocol,
   onJumpToMeters,
 }) => {
-  const { t, tHandoverType, tRoom, tMeterType, docLanguage } = useTranslation();
+  const { t, tHandoverType, tRoom, tMeterType, docLanguage, language } = useTranslation();
+  const { translateText, ensureTextsTranslated, registerDynamicTexts } = useTaskTranslation();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [type, setType] = useState<HandoverType>('Einzug');
   const [objectId, setObjectId] = useState<string>(
@@ -89,6 +92,7 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
   const [rooms, setRooms] = useState<HandoverRoomCheck[]>(() =>
     DEFAULT_ROOMS.map((r) => ({ ...r }))
   );
+  const [editedRoomNoteKeys, setEditedRoomNoteKeys] = useState<Set<string>>(() => new Set());
   const [keys, setKeys] = useState<HandoverKeys>({
     haustuer: 2,
     wohnungstuer: 3,
@@ -110,11 +114,31 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [showAddRoomPanel, setShowAddRoomPanel] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
+  const [exportingPdfId, setExportingPdfId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialObjectId) setObjectId(initialObjectId);
   }, [initialObjectId]);
+
+  useEffect(() => {
+    setEditedRoomNoteKeys(new Set());
+  }, [language]);
+
+  useEffect(() => {
+    const texts: string[] = [];
+    for (const r of rooms) {
+      if (!(r.room in ROOM_LABELS) && r.room.trim()) {
+        texts.push(r.room);
+      }
+      if (r.notes.trim()) {
+        texts.push(r.notes);
+      }
+    }
+    if (texts.length > 0) {
+      registerDynamicTexts(texts);
+    }
+  }, [rooms, registerDynamicTexts]);
 
   const selectedObject = objects.find((o) => o.id === objectId);
 
@@ -175,6 +199,35 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
     );
   };
 
+  const translateProtocolForPdf = async (
+    proto: HandoverProtocol
+  ): Promise<HandoverProtocol> => {
+    const texts: string[] = [];
+    for (const r of proto.rooms_json) {
+      if (!(r.room in ROOM_LABELS) && r.room.trim()) {
+        texts.push(r.room.trim());
+      }
+      if (r.notes?.trim()) {
+        texts.push(r.notes.trim());
+      }
+    }
+    if (texts.length === 0) return proto;
+    const translatedMap = await ensureTextsTranslated(texts, language);
+    return {
+      ...proto,
+      rooms_json: proto.rooms_json.map((r) => ({
+        ...r,
+        room:
+          !(r.room in ROOM_LABELS) && r.room.trim()
+            ? translatedMap[r.room.trim()] ?? r.room
+            : r.room,
+        notes: r.notes?.trim()
+          ? translatedMap[r.notes.trim()] ?? r.notes
+          : r.notes,
+      })),
+    };
+  };
+
   const handleFinish = async () => {
     if (!tenantName.trim()) {
       setError(t('handover.errTenant'));
@@ -182,25 +235,31 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
       return;
     }
     setError(null);
-    const created = await onCreateProtocol({
-      object_id: objectId,
-      apartment: apartment.trim() || 'Wohnung',
-      type,
-      landlord_name: landlordName.trim(),
-      tenant_name: tenantName.trim(),
-      tenant_email: tenantEmail.trim(),
-      rooms_json: rooms,
-      keys_json: keys,
-      meters_json: meters,
-      signature_landlord: sigLandlord,
-      signature_tenant: sigTenant,
-    });
-    setLastCreated(created);
-    exportHandoverProtocolPDF({
-      protocol: created,
-      obj: selectedObject,
-      docLang: docLanguage,
-    });
+    setExportingPdfId('finish');
+    try {
+      const created = await onCreateProtocol({
+        object_id: objectId,
+        apartment: apartment.trim() || 'Wohnung',
+        type,
+        landlord_name: landlordName.trim(),
+        tenant_name: tenantName.trim(),
+        tenant_email: tenantEmail.trim(),
+        rooms_json: rooms,
+        keys_json: keys,
+        meters_json: meters,
+        signature_landlord: sigLandlord,
+        signature_tenant: sigTenant,
+      });
+      setLastCreated(created);
+      const translatedProtocol = await translateProtocolForPdf(created);
+      exportHandoverProtocolPDF({
+        protocol: translatedProtocol,
+        obj: selectedObject,
+        docLang: docLanguage,
+      });
+    } finally {
+      setExportingPdfId(null);
+    }
   };
 
   const resetWizard = () => {
@@ -208,6 +267,7 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
     setTenantName('');
     setTenantEmail('');
     setRooms(DEFAULT_ROOMS.map((r) => ({ ...r })));
+    setEditedRoomNoteKeys(new Set());
     setShowAddRoomPanel(false);
     setNewRoomName('');
     setSigLandlord(undefined);
@@ -365,7 +425,9 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="font-display text-sm font-bold text-slate-900 dark:text-white truncate">
-                        {tRoom(roomItem.room)}
+                        {roomItem.room in ROOM_LABELS
+                          ? tRoom(roomItem.room)
+                          : translateText(roomItem.room)}
                       </span>
                       {roomItem.photo && (
                         <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
@@ -416,12 +478,23 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
                   <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
-                      value={roomItem.notes}
-                      onChange={(e) =>
-                        setRooms((prev) =>
-                          prev.map((r, i) => (i === idx ? { ...r, notes: e.target.value } : r))
-                        )
+                      value={
+                        editedRoomNoteKeys.has(roomKey)
+                          ? roomItem.notes
+                          : translateText(roomItem.notes)
                       }
+                      onChange={(e) => {
+                        const nextVal = e.target.value;
+                        setEditedRoomNoteKeys((prev) => {
+                          if (prev.has(roomKey)) return prev;
+                          const next = new Set(prev);
+                          next.add(roomKey);
+                          return next;
+                        });
+                        setRooms((prev) =>
+                          prev.map((r, i) => (i === idx ? { ...r, notes: nextVal } : r))
+                        );
+                      }}
                       placeholder={t('handover.roomNotesPlaceholder')}
                       className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white"
                     />
@@ -759,10 +832,15 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
           ) : (
             <button
               type="button"
-              onClick={handleFinish}
-              className="flex items-center gap-2 rounded-xl bg-orange-500 hover:bg-orange-600 px-5 py-2.5 text-xs sm:text-sm font-semibold text-white cursor-pointer"
+              disabled={exportingPdfId === 'finish'}
+              onClick={() => void handleFinish()}
+              className="flex items-center gap-2 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-60 px-5 py-2.5 text-xs sm:text-sm font-semibold text-white cursor-pointer"
             >
-              <FileDown className="w-4 h-4" />
+              {exportingPdfId === 'finish' ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileDown className="w-4 h-4" />
+              )}
               {t('handover.finishBtn')}
             </button>
           )}
@@ -779,12 +857,18 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
           {protocols.map((p) => {
             const obj = objects.find((o) => o.id === p.object_id);
+            const roomNoteSummaries = p.rooms_json
+              .filter((r) => r.notes?.trim())
+              .map((r) => {
+                const rName = r.room in ROOM_LABELS ? tRoom(r.room) : translateText(r.room);
+                return `${rName}: ${translateText(r.notes)}`;
+              });
             return (
               <div
                 key={p.id}
                 className="p-4 sm:px-5 flex flex-wrap items-center justify-between gap-3"
               >
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
                     {formatDateTimeDE(p.created_at)} · {tHandoverType(p.type)}
                   </p>
@@ -794,19 +878,35 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {t('handover.tenantFallback')}: {p.tenant_name}
                   </p>
+                  {roomNoteSummaries.length > 0 && (
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 line-clamp-2">
+                      {roomNoteSummaries.join(' · ')}
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
-                  onClick={() =>
-                    exportHandoverProtocolPDF({
-                      protocol: p,
-                      obj,
-                      docLang: docLanguage,
-                    })
-                  }
-                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-orange-500 px-3.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 cursor-pointer"
+                  disabled={exportingPdfId === p.id}
+                  onClick={async () => {
+                    setExportingPdfId(p.id);
+                    try {
+                      const translatedProto = await translateProtocolForPdf(p);
+                      exportHandoverProtocolPDF({
+                        protocol: translatedProto,
+                        obj,
+                        docLang: docLanguage,
+                      });
+                    } finally {
+                      setExportingPdfId(null);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-orange-500 disabled:opacity-60 px-3.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 cursor-pointer shrink-0"
                 >
-                  <FileDown className="w-3.5 h-3.5 text-orange-500" />
+                  {exportingPdfId === p.id ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-500" />
+                  ) : (
+                    <FileDown className="w-3.5 h-3.5 text-orange-500" />
+                  )}
                   <span>{t('handover.downloadPdf')}</span>
                 </button>
               </div>
@@ -820,7 +920,11 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
         <CompleteTaskModal
           title={t('handover.photoModalTitle')}
           hint={t('handover.photoModalHint')}
-          taskTitle={tRoom(rooms[photoChoiceRoomIdx].room)}
+          taskTitle={
+            rooms[photoChoiceRoomIdx].room in ROOM_LABELS
+              ? tRoom(rooms[photoChoiceRoomIdx].room)
+              : translateText(rooms[photoChoiceRoomIdx].room)
+          }
           subtitle={`${selectedObject?.name ?? t('common.object')} · ${apartment}`}
           allowWithoutPhoto={false}
           loading={uploadingRoomIdx === photoChoiceRoomIdx}
