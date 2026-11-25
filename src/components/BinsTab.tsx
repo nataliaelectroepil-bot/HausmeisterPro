@@ -31,6 +31,7 @@ import {
 } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { BIN_VISUAL_META, getTaskEffectiveBinTypes } from '../utils/binMeta';
+import { PhotoUploadButtons } from './PhotoUploadButtons';
 
 interface BinsTabProps {
   schedules: BinSchedule[];
@@ -169,12 +170,7 @@ export const BinsTab: React.FC<BinsTabProps> = ({
     });
   };
 
-  const handleBinPhotoUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-    bin: BinSchedule
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleBinPhotoUpload = async (file: File, bin: BinSchedule) => {
     const obj = objects.find((o) => o.id === bin.object_id);
     setUploadingPhotoId(bin.id);
     try {
@@ -188,18 +184,14 @@ export const BinsTab: React.FC<BinsTabProps> = ({
       setPhotoModalBin({ ...bin, photo });
     } finally {
       setUploadingPhotoId(null);
-      e.target.value = '';
     }
   };
 
   const handleTaskQuickPhoto = async (
-    e: React.ChangeEvent<HTMLInputElement>,
+    file: File,
     task: FacilityTask,
     obj?: PropertyObject
   ) => {
-    e.stopPropagation();
-    const file = e.target.files?.[0];
-    if (!file) return;
     setUploadingTaskId(task.id);
     try {
       const photo = await createWatermarkedPhoto(file, {
@@ -211,7 +203,6 @@ export const BinsTab: React.FC<BinsTabProps> = ({
       await onQuickCompleteWithPhoto(task, photo);
     } finally {
       setUploadingTaskId(null);
-      e.target.value = '';
     }
   };
 
@@ -554,21 +545,13 @@ export const BinsTab: React.FC<BinsTabProps> = ({
                                 <span>{t('bins.markDone')}</span>
                               </button>
 
-                              <label className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 text-xs font-semibold text-white cursor-pointer transition-colors min-h-[38px]">
-                                <Camera className="w-3.5 h-3.5" />
-                                <span>
-                                  {uploadingTaskId === task.id
-                                    ? t('tasks.savingPhoto')
-                                    : t('common.photoCompleteBtn')}
-                                </span>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  capture="environment"
-                                  className="hidden"
-                                  onChange={(e) => handleTaskQuickPhoto(e, task, obj)}
-                                />
-                              </label>
+                              <PhotoUploadButtons
+                                onSelectFile={(file) => handleTaskQuickPhoto(file, task, obj)}
+                                loading={uploadingTaskId === task.id}
+                                loadingLabel={t('tasks.savingPhoto')}
+                                variant="emerald"
+                                compact
+                              />
                             </>
                           ) : (
                             <button
@@ -750,21 +733,13 @@ export const BinsTab: React.FC<BinsTabProps> = ({
               </div>
             )}
 
-            <label className="w-full flex items-center justify-center gap-2 rounded-xl bg-orange-500 hover:bg-orange-600 py-2.5 text-sm font-semibold text-white cursor-pointer">
-              <Camera className="w-4 h-4" />
-              <span>
-                {uploadingPhotoId === photoModalBin.id
-                  ? t('bins.photoProcessing')
-                  : t('bins.photoTakeNew')}
-              </span>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={(e) => handleBinPhotoUpload(e, photoModalBin)}
-              />
-            </label>
+            <PhotoUploadButtons
+              onSelectFile={(file) => handleBinPhotoUpload(file, photoModalBin)}
+              loading={uploadingPhotoId === photoModalBin.id}
+              loadingLabel={t('bins.photoProcessing')}
+              variant="orange"
+              fullWidth
+            />
           </div>
         </div>
       )}

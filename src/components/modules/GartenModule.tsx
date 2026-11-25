@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Camera,
   CheckCircle2,
   FileDown,
   Save,
@@ -16,6 +15,7 @@ import {
 import { formatDateDE, getTodayISODate } from '../../utils/dateUtils';
 import { exportGardenBillingPDF } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
+import { PhotoUploadButtons } from '../PhotoUploadButtons';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 interface GartenModuleProps {
@@ -59,6 +59,7 @@ export const GartenModule: React.FC<GartenModuleProps> = ({
   const [notes, setNotes] = useState('');
   const [beforePhoto, setBeforePhoto] = useState<TaskPhoto | undefined>(undefined);
   const [afterPhoto, setAfterPhoto] = useState<TaskPhoto | undefined>(undefined);
+  const [uploadingKind, setUploadingKind] = useState<'before' | 'after' | null>(null);
   const [savedNotice, setSavedNotice] = useState(false);
 
   useEffect(() => {
@@ -82,20 +83,23 @@ export const GartenModule: React.FC<GartenModuleProps> = ({
 
   const handlePhotoUpload = async (
     kind: 'before' | 'after',
-    e: React.ChangeEvent<HTMLInputElement>
+    file: File
   ) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedObject) return;
-    const watermarked = await createWatermarkedPhoto(file, {
-      objectName: selectedObject.name,
-      fallbackLat: selectedObject.lat,
-      fallbackLng: selectedObject.lng,
-      caption: kind === 'before' ? 'Gartenpflege Vorher' : 'Gartenpflege Nachher',
-      extraStamp: kind === 'before' ? 'VORHER' : 'NACHHER',
-    });
-    if (kind === 'before') setBeforePhoto(watermarked);
-    else setAfterPhoto(watermarked);
-    e.target.value = '';
+    if (!selectedObject) return;
+    setUploadingKind(kind);
+    try {
+      const watermarked = await createWatermarkedPhoto(file, {
+        objectName: selectedObject.name,
+        fallbackLat: selectedObject.lat,
+        fallbackLng: selectedObject.lng,
+        caption: kind === 'before' ? 'Gartenpflege Vorher' : 'Gartenpflege Nachher',
+        extraStamp: kind === 'before' ? 'VORHER' : 'NACHHER',
+      });
+      if (kind === 'before') setBeforePhoto(watermarked);
+      else setAfterPhoto(watermarked);
+    } finally {
+      setUploadingKind(null);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -307,21 +311,15 @@ export const GartenModule: React.FC<GartenModuleProps> = ({
         {/* Before / After Photos */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                 {t('garden.beforePhoto')}
               </span>
-              <label className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-semibold cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
-                <Camera className="w-3.5 h-3.5 text-orange-500" />
-                <span>{t('garden.capture')}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => handlePhotoUpload('before', e)}
-                />
-              </label>
+              <PhotoUploadButtons
+                compact
+                loading={uploadingKind === 'before'}
+                onSelectFile={(file) => handlePhotoUpload('before', file)}
+              />
             </div>
             {beforePhoto && (
               <img
@@ -334,21 +332,15 @@ export const GartenModule: React.FC<GartenModuleProps> = ({
           </div>
 
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                 {t('garden.afterPhoto')}
               </span>
-              <label className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-semibold cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
-                <Camera className="w-3.5 h-3.5 text-emerald-500" />
-                <span>{t('garden.capture')}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => handlePhotoUpload('after', e)}
-                />
-              </label>
+              <PhotoUploadButtons
+                compact
+                loading={uploadingKind === 'after'}
+                onSelectFile={(file) => handlePhotoUpload('after', file)}
+              />
             </div>
             {afterPhoto && (
               <img

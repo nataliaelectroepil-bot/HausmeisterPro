@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  Camera,
   CheckCircle2,
   ClipboardCheck,
   Clock,
@@ -21,6 +20,7 @@ import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { BIN_VISUAL_META } from '../utils/binMeta';
 import { exportTaskProtocolPDF } from '../utils/pdfExport';
+import { PhotoUploadButtons } from './PhotoUploadButtons';
 
 interface TasksTabProps {
   tasks: FacilityTask[];
@@ -85,13 +85,10 @@ export const TasksTab: React.FC<TasksTabProps> = ({
   }, [categoryFiltered, selectedStatus]);
 
   const handleQuickPhoto = async (
-    e: React.ChangeEvent<HTMLInputElement>,
+    file: File,
     task: FacilityTask,
     obj?: PropertyObject
   ) => {
-    e.stopPropagation();
-    const file = e.target.files?.[0];
-    if (!file) return;
     setUploadingTaskId(task.id);
     try {
       const photo = await createWatermarkedPhoto(file, {
@@ -103,7 +100,6 @@ export const TasksTab: React.FC<TasksTabProps> = ({
       await onQuickCompleteWithPhoto(task, photo);
     } finally {
       setUploadingTaskId(null);
-      e.target.value = '';
     }
   };
 
@@ -353,21 +349,13 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                     </button>
 
                     {task.status !== 'erledigt' ? (
-                      <label className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 text-xs font-semibold text-white cursor-pointer transition-colors min-h-[40px]">
-                        <Camera className="w-3.5 h-3.5" />
-                        <span>
-                          {uploadingTaskId === task.id
-                            ? t('tasks.savingPhoto')
-                            : t('common.photoCompleteBtn')}
-                        </span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          className="hidden"
-                          onChange={(e) => handleQuickPhoto(e, task, obj)}
-                        />
-                      </label>
+                      <PhotoUploadButtons
+                        onSelectFile={(file) => handleQuickPhoto(file, task, obj)}
+                        loading={uploadingTaskId === task.id}
+                        loadingLabel={t('tasks.savingPhoto')}
+                        variant="emerald"
+                        compact
+                      />
                     ) : (
                       <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                         <CheckCircle2 className="w-4 h-4" />

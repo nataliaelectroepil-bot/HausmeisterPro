@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Camera,
   CheckCircle2,
   CloudSnow,
   FileDown,
@@ -21,6 +20,7 @@ import { exportWinterLogPDF } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { captureCurrentGPS, fetchLocalWeather } from '../../utils/weather';
 import { SignaturePad } from '../SignaturePad';
+import { PhotoUploadButtons } from '../PhotoUploadButtons';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 interface WinterdienstModuleProps {
@@ -67,6 +67,7 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
   const [photo, setPhoto] = useState<TaskPhoto | undefined>(undefined);
   const [signature, setSignature] = useState<string | undefined>(undefined);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -98,19 +99,24 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
     }
   };
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedObject) return;
+  const handlePhotoUpload = async (file: File) => {
+    if (!selectedObject) return;
     setValidationError(null);
-    const watermarked = await createWatermarkedPhoto(file, {
-      objectName: selectedObject.name,
-      fallbackLat: lat,
-      fallbackLng: lng,
-      caption: `Winterdienst Nachher-Foto (${actionType})`,
-      extraStamp: `${tempCelsius.toFixed(1)} °C · ${weatherDesc}`,
-    });
-    setPhoto(watermarked);
-    e.target.value = '';
+    setUploadingPhoto(true);
+    try {
+      const watermarked = await createWatermarkedPhoto(file, {
+        objectName: selectedObject.name,
+        fallbackLat: lat,
+        fallbackLng: lng,
+        caption: `Winterdienst Nachher-Foto (${actionType})`,
+        extraStamp: `${tempCelsius.toFixed(1)} °C · ${weatherDesc}`,
+      });
+      setPhoto(watermarked);
+    } catch {
+      setValidationError(t('winter.photoErr'));
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   const handleCompleteLog = async (exportImmediately: boolean) => {
@@ -295,17 +301,11 @@ export const WinterdienstModule: React.FC<WinterdienstModuleProps> = ({
                     {t('winter.photoRequiredTitle', { temp: tempCelsius.toFixed(1) })}
                   </p>
                 </div>
-                <label className="flex items-center gap-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-white cursor-pointer min-h-[40px]">
-                  <Camera className="w-4 h-4 text-orange-400" />
-                  <span>{photo ? t('winter.photoReplace') : t('winter.photoTake')}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={handlePhotoUpload}
-                  />
-                </label>
+                <PhotoUploadButtons
+                  compact
+                  loading={uploadingPhoto}
+                  onSelectFile={handlePhotoUpload}
+                />
               </div>
 
               {photo && (

@@ -3,7 +3,6 @@ import L from 'leaflet';
 import {
   AlertTriangle,
   Building2,
-  Camera,
   CheckCircle2,
   ExternalLink,
   List,
@@ -19,6 +18,7 @@ import { FacilityTask, PropertyObject } from '../types/facility';
 import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { searchAddressCoordinates } from '../utils/geocoding';
+import { PhotoUploadButtons } from './PhotoUploadButtons';
 
 interface MapTabProps {
   objects: PropertyObject[];
@@ -439,12 +439,10 @@ export const MapTab: React.FC<MapTabProps> = ({
     selectedObjectTasks[0];
 
   const handleQuickPhotoComplete = async (
-    e: React.ChangeEvent<HTMLInputElement>,
+    file: File,
     task: FacilityTask,
     meta: { name: string; lat?: number; lng?: number }
   ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
     setUploadingId(task.id);
     try {
       const photo = await createWatermarkedPhoto(file, {
@@ -456,7 +454,6 @@ export const MapTab: React.FC<MapTabProps> = ({
       await onQuickCompleteWithPhoto(task, photo);
     } finally {
       setUploadingId(null);
-      e.target.value = '';
     }
   };
 
@@ -579,27 +576,19 @@ export const MapTab: React.FC<MapTabProps> = ({
 
                   <div className="pt-1 flex flex-wrap items-center gap-2">
                     {primaryTask.status !== 'erledigt' && (
-                      <label className="flex-1 min-w-[150px] flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 py-2.5 text-xs font-semibold text-white cursor-pointer transition-colors min-h-[44px]">
-                        <Camera className="w-4 h-4 shrink-0" />
-                        <span>
-                          {uploadingId === primaryTask.id
-                            ? t('common.photoSending')
-                            : t('common.photoCompleteBtn')}
-                        </span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          className="hidden"
-                          onChange={(e) =>
-                            handleQuickPhotoComplete(e, primaryTask, {
-                              name: selectedObject.name,
-                              lat: selectedObject.lat,
-                              lng: selectedObject.lng,
-                            })
-                          }
-                        />
-                      </label>
+                      <PhotoUploadButtons
+                        onSelectFile={(file) =>
+                          handleQuickPhotoComplete(file, primaryTask, {
+                            name: selectedObject.name,
+                            lat: selectedObject.lat,
+                            lng: selectedObject.lng,
+                          })
+                        }
+                        loading={uploadingId === primaryTask.id}
+                        loadingLabel={t('common.photoSending')}
+                        variant="emerald"
+                        fullWidth
+                      />
                     )}
 
                     <button
@@ -741,27 +730,19 @@ export const MapTab: React.FC<MapTabProps> = ({
 
                 <div className="pt-1 flex flex-wrap items-center gap-2">
                   {selectedStandalonePin.task.status !== 'erledigt' && (
-                    <label className="flex-1 min-w-[150px] flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 py-2.5 text-xs font-semibold text-white cursor-pointer transition-colors min-h-[44px]">
-                      <Camera className="w-4 h-4 shrink-0" />
-                      <span>
-                        {uploadingId === selectedStandalonePin.task.id
-                          ? t('common.photoSending')
-                          : t('common.photoCompleteBtn')}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={(e) =>
-                          handleQuickPhotoComplete(e, selectedStandalonePin.task, {
-                            name: selectedStandalonePin.address,
-                            lat: selectedStandalonePin.lat,
-                            lng: selectedStandalonePin.lng,
-                          })
-                        }
-                      />
-                    </label>
+                    <PhotoUploadButtons
+                      onSelectFile={(file) =>
+                        handleQuickPhotoComplete(file, selectedStandalonePin.task, {
+                          name: selectedStandalonePin.address,
+                          lat: selectedStandalonePin.lat,
+                          lng: selectedStandalonePin.lng,
+                        })
+                      }
+                      loading={uploadingId === selectedStandalonePin.task.id}
+                      loadingLabel={t('common.photoSending')}
+                      variant="emerald"
+                      fullWidth
+                    />
                   )}
 
                   <button

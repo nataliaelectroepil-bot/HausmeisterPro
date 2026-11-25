@@ -9,12 +9,14 @@ import {
   LanguageCode,
   MeterReading,
   PropertyObject,
+  TaskPhoto,
   TimeEntry,
   User,
   WinterLog,
 } from '../types/facility';
 import { getISOWeekAndYear, getWeekStartEnd } from '../utils/dateUtils';
 import { normalizeBinTypes } from '../utils/binMeta';
+import { compressTaskPhotoIfNeeded } from '../utils/photoWatermark';
 
 const STORAGE_KEYS = {
   users: 'hmpro_pb_users_v1',
@@ -1041,6 +1043,48 @@ function buildSeedData() {
   };
 }
 
+const MAX_LOCAL_IMAGE_DATAURL_CHARS = 450_000;
+
+function stripOversizedImagesForLocalStorage<T>(value: T): T {
+  const seen = new WeakSet<object>();
+  const walk = (node: unknown): unknown => {
+    if (typeof node === 'string') {
+      if (node.startsWith('data:image/') && node.length > MAX_LOCAL_IMAGE_DATAURL_CHARS) {
+        return '';
+      }
+      return node;
+    }
+    if (!node || typeof node !== 'object') return node;
+    if (seen.has(node as object)) return node;
+    seen.add(node as object);
+
+    if (Array.isArray(node)) {
+      return node.map(walk);
+    }
+    const obj = node as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (
+        k === 'dataUrl' &&
+        typeof v === 'string' &&
+        v.startsWith('data:image/') &&
+        (!v.startsWith('data:image/jpeg') || v.length > MAX_LOCAL_IMAGE_DATAURL_CHARS)
+      ) {
+        out[k] = '';
+      } else {
+        out[k] = walk(v);
+      }
+    }
+    return out;
+  };
+  return walk(value) as T;
+}
+
+async function compressPhotoList(photos?: TaskPhoto[]): Promise<TaskPhoto[] | undefined> {
+  if (!photos) return undefined;
+  return Promise.all(photos.map((p) => compressTaskPhotoIfNeeded(p)));
+}
+
 function readStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -1056,7 +1100,8 @@ function readStorage<T>(key: string, fallback: T): T {
 
 function writeStorage<T>(key: string, value: T): void {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    const safeValue = stripOversizedImagesForLocalStorage(value);
+    localStorage.setItem(key, JSON.stringify(safeValue));
   } catch {
     // Ignore storage quota issues safely
   }
@@ -1512,6 +1557,7 @@ export const pocketbaseService = {
   },
 
   async createTask(input: Omit<FacilityTask, 'id' | 'created_at'>): Promise<FacilityTask> {
+    const compressedPhotos = (await compressPhotoList(input.photos)) ?? [];
     if (this.isPocketBaseEnabled()) {
       const pbPayload: Record<string, unknown> = {
         title: input.title,
@@ -1524,7 +1570,7 @@ export const pocketbaseService = {
         assigned_to: input.assigned_to || pb.authStore.model?.id || '',
         checklist_json: input.checklist_json ?? [],
         notes: input.notes ?? '',
-        photos: input.photos ?? [],
+        photos: compressedPhotos,
       };
       if (input.bin_types && input.bin_types.length > 0) {
         pbPayload.bin_types = input.bin_types;
@@ -1557,6 +1603,7 @@ export const pocketbaseService = {
 
     const created: FacilityTask = {
       ...input,
+      photos: compressedPhotos,
       id: `task_${Date.now()}`,
       created_at: new Date().toISOString(),
     };
@@ -1567,9 +1614,13 @@ export const pocketbaseService = {
   },
 
   async updateTask(id: string, patch: Partial<FacilityTask>): Promise<FacilityTask[]> {
+    const normalizedPatch: Partial<FacilityTask> = patch.photos
+      ? { ...patch, photos: await compressPhotoList(patch.photos) }
+      : patch;
+
     if (this.isPocketBaseEnabled()) {
-      const pbPatch: Record<string, unknown> = { ...patch };
-      if (patch.status && patch.status !== 'erledigt') {
+      const pbPatch: Record<string, unknown> = { ...normalizedPatch };
+      if (normalizedPatch.status && normalizedPatch.status !== 'erledigt') {
         pbPatch.completed_at = null;
         pbPatch.completed_lat = null;
         pbPatch.completed_lng = null;
@@ -1584,8 +1635,8 @@ export const pocketbaseService = {
     const list = await this.getTasks();
     const updated = list.map((t) => {
       if (t.id !== id) return t;
-      const merged: FacilityTask = { ...t, ...patch };
-      if (patch.status && patch.status !== 'erledigt') {
+      const merged: FacilityTask = { ...t, ...normalizedPatch };
+      if (normalizedPatch.status && normalizedPatch.status !== 'erledigt') {
         merged.completed_at = undefined;
         merged.completed_lat = undefined;
         merged.completed_lng = undefined;
@@ -1646,18 +1697,22 @@ export const pocketbaseService = {
   },
 
   async updateBinSchedule(id: string, patch: Partial<BinSchedule>): Promise<BinSchedule[]> {
+    const safePatch: Partial<BinSchedule> = patch.photo
+      ? { ...patch, photo: await compressTaskPhotoIfNeeded(patch.photo) }
+      : patch;
+
     if (this.isPocketBaseEnabled()) {
       await pbRequest(
         `/api/collections/${pocketbaseConfig.collections.bin_schedules}/records/${id}`,
         {
           method: 'PATCH',
-          body: JSON.stringify(patch),
+          body: JSON.stringify(safePatch),
         }
       );
       return this.getBinSchedules();
     }
     const list = await this.getBinSchedules();
-    const updated = list.map((b) => (b.id === id ? { ...b, ...patch } : b));
+    const updated = list.map((b) => (b.id === id ? { ...b, ...safePatch } : b));
     writeStorage(STORAGE_KEYS.bins, updated);
     return updated;
   },
@@ -1749,14 +1804,18 @@ export const pocketbaseService = {
   },
 
   async createWinterLog(input: Omit<WinterLog, 'id'>): Promise<WinterLog[]> {
+    const safeInput: Omit<WinterLog, 'id'> = input.photo
+      ? { ...input, photo: await compressTaskPhotoIfNeeded(input.photo) }
+      : input;
+
     if (this.isPocketBaseEnabled()) {
       await pbRequest(`/api/collections/${pocketbaseConfig.collections.winter_logs}/records`, {
         method: 'POST',
-        body: JSON.stringify(input),
+        body: JSON.stringify(safeInput),
       });
       return this.getWinterLogs();
     }
-    const created: WinterLog = { ...input, id: `wl_${Date.now()}` };
+    const created: WinterLog = { ...safeInput, id: `wl_${Date.now()}` };
     const list = await this.getWinterLogs();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.winterLogs, updated);
@@ -1776,14 +1835,18 @@ export const pocketbaseService = {
   },
 
   async createMeterReading(input: Omit<MeterReading, 'id'>): Promise<MeterReading[]> {
+    const safeInput: Omit<MeterReading, 'id'> = input.photo
+      ? { ...input, photo: await compressTaskPhotoIfNeeded(input.photo) }
+      : input;
+
     if (this.isPocketBaseEnabled()) {
       await pbRequest(`/api/collections/${pocketbaseConfig.collections.meter_readings}/records`, {
         method: 'POST',
-        body: JSON.stringify(input),
+        body: JSON.stringify(safeInput),
       });
       return this.getMeterReadings();
     }
-    const created: MeterReading = { ...input, id: `mr_${Date.now()}` };
+    const created: MeterReading = { ...safeInput, id: `mr_${Date.now()}` };
     const list = await this.getMeterReadings();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.meterReadings, updated);
@@ -1805,13 +1868,23 @@ export const pocketbaseService = {
   async createHandoverProtocol(
     input: Omit<HandoverProtocol, 'id' | 'created_at'>
   ): Promise<{ created: HandoverProtocol; all: HandoverProtocol[] }> {
+    const safeRooms = await Promise.all(
+      input.rooms_json.map(async (r) =>
+        r.photo ? { ...r, photo: await compressTaskPhotoIfNeeded(r.photo) } : r
+      )
+    );
+    const safeInput: Omit<HandoverProtocol, 'id' | 'created_at'> = {
+      ...input,
+      rooms_json: safeRooms,
+    };
+
     if (this.isPocketBaseEnabled()) {
       const createdRemote = await pbRequest<HandoverProtocol>(
         `/api/collections/${pocketbaseConfig.collections.handover_protocols}/records`,
         {
           method: 'POST',
           body: JSON.stringify({
-            ...input,
+            ...safeInput,
             created_at: new Date().toISOString(),
           }),
         }
@@ -1823,7 +1896,7 @@ export const pocketbaseService = {
       return { created: createdRemote, all };
     }
     const created: HandoverProtocol = {
-      ...input,
+      ...safeInput,
       id: `hp_${Date.now()}`,
       created_at: new Date().toISOString(),
     };
@@ -1846,14 +1919,18 @@ export const pocketbaseService = {
   },
 
   async createCleaningLog(input: Omit<CleaningLog, 'id'>): Promise<CleaningLog[]> {
+    const safeInput: Omit<CleaningLog, 'id'> = input.photo
+      ? { ...input, photo: await compressTaskPhotoIfNeeded(input.photo) }
+      : input;
+
     if (this.isPocketBaseEnabled()) {
       await pbRequest(`/api/collections/${pocketbaseConfig.collections.cleaning_logs}/records`, {
         method: 'POST',
-        body: JSON.stringify(input),
+        body: JSON.stringify(safeInput),
       });
       return this.getCleaningLogs();
     }
-    const created: CleaningLog = { ...input, id: `cl_${Date.now()}` };
+    const created: CleaningLog = { ...safeInput, id: `cl_${Date.now()}` };
     const list = await this.getCleaningLogs();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.cleaningLogs, updated);
@@ -1873,14 +1950,27 @@ export const pocketbaseService = {
   },
 
   async createGardenLog(input: Omit<GardenLog, 'id'>): Promise<GardenLog[]> {
+    const safePhotos = {
+      before: input.photos.before
+        ? await compressTaskPhotoIfNeeded(input.photos.before)
+        : undefined,
+      after: input.photos.after
+        ? await compressTaskPhotoIfNeeded(input.photos.after)
+        : undefined,
+    };
+    const safeInput: Omit<GardenLog, 'id'> = {
+      ...input,
+      photos: safePhotos,
+    };
+
     if (this.isPocketBaseEnabled()) {
       await pbRequest(`/api/collections/${pocketbaseConfig.collections.garden_logs}/records`, {
         method: 'POST',
-        body: JSON.stringify(input),
+        body: JSON.stringify(safeInput),
       });
       return this.getGardenLogs();
     }
-    const created: GardenLog = { ...input, id: `gl_${Date.now()}` };
+    const created: GardenLog = { ...safeInput, id: `gl_${Date.now()}` };
     const list = await this.getGardenLogs();
     const updated = [created, ...list];
     writeStorage(STORAGE_KEYS.gardenLogs, updated);

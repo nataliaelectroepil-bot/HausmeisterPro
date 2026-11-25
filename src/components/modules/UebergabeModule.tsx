@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Camera,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -26,6 +25,7 @@ import { formatDateTimeDE } from '../../utils/dateUtils';
 import { exportHandoverProtocolPDF } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { SignaturePad } from '../SignaturePad';
+import { PhotoUploadButtons } from '../PhotoUploadButtons';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 interface UebergabeModuleProps {
@@ -88,6 +88,7 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
   const [sigLandlord, setSigLandlord] = useState<string | undefined>(undefined);
   const [sigTenant, setSigTenant] = useState<string | undefined>(undefined);
   const [lastCreated, setLastCreated] = useState<HandoverProtocol | null>(null);
+  const [uploadingRoomIdx, setUploadingRoomIdx] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -96,23 +97,23 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
 
   const selectedObject = objects.find((o) => o.id === objectId);
 
-  const handleRoomPhoto = async (
-    idx: number,
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedObject) return;
-    const roomName = rooms[idx].room;
-    const photo = await createWatermarkedPhoto(file, {
-      objectName: `${selectedObject.name} · ${apartment}`,
-      fallbackLat: selectedObject.lat,
-      fallbackLng: selectedObject.lng,
-      caption: `Übergabe ${roomName}`,
-    });
-    setRooms((prev) =>
-      prev.map((r, i) => (i === idx ? { ...r, photo } : r))
-    );
-    e.target.value = '';
+  const handleRoomPhoto = async (idx: number, file: File) => {
+    if (!selectedObject) return;
+    setUploadingRoomIdx(idx);
+    try {
+      const roomName = rooms[idx].room;
+      const photo = await createWatermarkedPhoto(file, {
+        objectName: `${selectedObject.name} · ${apartment}`,
+        fallbackLat: selectedObject.lat,
+        fallbackLng: selectedObject.lng,
+        caption: `Übergabe ${roomName}`,
+      });
+      setRooms((prev) =>
+        prev.map((r, i) => (i === idx ? { ...r, photo } : r))
+      );
+    } finally {
+      setUploadingRoomIdx(null);
+    }
   };
 
   const handleFinish = async () => {
@@ -339,19 +340,11 @@ export const UebergabeModule: React.FC<UebergabeModuleProps> = ({
                     placeholder={t('handover.roomNotesPlaceholder')}
                     className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white"
                   />
-                  <label className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer shrink-0">
-                    <Camera className="w-3.5 h-3.5 text-orange-500" />
-                    <span>
-                      {roomItem.photo ? t('handover.photoCaptured') : t('handover.damagePhoto')}
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      onChange={(e) => handleRoomPhoto(idx, e)}
-                    />
-                  </label>
+                  <PhotoUploadButtons
+                    compact
+                    loading={uploadingRoomIdx === idx}
+                    onSelectFile={(file) => handleRoomPhoto(idx, file)}
+                  />
                 </div>
               </div>
             ))}

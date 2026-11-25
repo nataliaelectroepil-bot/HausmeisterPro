@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  Camera,
   CheckCircle2,
   FileDown,
   MapPin,
@@ -20,6 +19,7 @@ import { exportCleaningReportPDF } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { captureCurrentGPS } from '../../utils/weather';
 import { QRBarcodeScannerModal } from '../QRBarcodeScannerModal';
+import { PhotoUploadButtons } from '../PhotoUploadButtons';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 interface ReinigungModuleProps {
@@ -67,6 +67,7 @@ export const ReinigungModule: React.FC<ReinigungModuleProps> = ({
   const [status, setStatus] = useState<'Erledigt' | 'Mängelmeldung'>('Erledigt');
   const [notes, setNotes] = useState('');
   const [photo, setPhoto] = useState<TaskPhoto | undefined>(undefined);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -101,19 +102,24 @@ export const ReinigungModule: React.FC<ReinigungModuleProps> = ({
     setError(null);
   };
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedObject) return;
+  const handlePhotoUpload = async (file: File) => {
+    if (!selectedObject) return;
     setError(null);
-    const watermarked = await createWatermarkedPhoto(file, {
-      objectName: selectedObject.name,
-      fallbackLat: gpsCoords?.lat ?? selectedObject.lat,
-      fallbackLng: gpsCoords?.lng ?? selectedObject.lng,
-      caption: `Reinigung ${checkedInQR ?? ''}`,
-      extraStamp: status === 'Mängelmeldung' ? 'MÄNGELMELDUNG' : 'Reinigung bestätigt',
-    });
-    setPhoto(watermarked);
-    e.target.value = '';
+    setUploadingPhoto(true);
+    try {
+      const watermarked = await createWatermarkedPhoto(file, {
+        objectName: selectedObject.name,
+        fallbackLat: gpsCoords?.lat ?? selectedObject.lat,
+        fallbackLng: gpsCoords?.lng ?? selectedObject.lng,
+        caption: `Reinigung ${checkedInQR ?? ''}`,
+        extraStamp: status === 'Mängelmeldung' ? 'MÄNGELMELDUNG' : 'Reinigung bestätigt',
+      });
+      setPhoto(watermarked);
+    } catch {
+      setError(t('clean.photoErr'));
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   const handleSaveCleaningLog = async () => {
@@ -306,17 +312,11 @@ export const ReinigungModule: React.FC<ReinigungModuleProps> = ({
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
                   {t('clean.photoReq')}
                 </span>
-                <label className="flex items-center gap-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-white cursor-pointer">
-                  <Camera className="w-4 h-4 text-orange-400" />
-                  <span>{photo ? t('winter.photoReplace') : t('clean.photoTake')}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={handlePhotoUpload}
-                  />
-                </label>
+                <PhotoUploadButtons
+                  compact
+                  loading={uploadingPhoto}
+                  onSelectFile={handlePhotoUpload}
+                />
               </div>
               {photo && (
                 <img

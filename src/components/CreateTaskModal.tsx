@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
-  Camera,
   Check,
   CheckCircle2,
   Loader2,
@@ -27,6 +26,7 @@ import { BIN_TYPE_ORDER, BIN_VISUAL_META } from '../utils/binMeta';
 import { getTodayISODate } from '../utils/dateUtils';
 import { reverseGeocodeCoordinates, searchAddressCoordinates } from '../utils/geocoding';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
+import { PhotoUploadButtons } from './PhotoUploadButtons';
 
 interface CreateTaskModalProps {
   objects: PropertyObject[];
@@ -97,6 +97,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [dueDate, setDueDate] = useState<string>(defaultDate || getTodayISODate());
   const [dueTime, setDueTime] = useState<string>('10:00');
   const [photos, setPhotos] = useState<TaskPhoto[]>([]);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [savingObject, setSavingObject] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -335,27 +336,32 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   };
 
-  const handlePhotoAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const fallbackManualCoords =
-      addressMode === 'manual'
-        ? parseCoords(manualLat, manualLng)
-        : addressMode === 'newObject'
-        ? parseCoords(newObjLat, newObjLng)
-        : null;
-    const watermarked = await createWatermarkedPhoto(file, {
-      objectName:
-        addressMode === 'existing'
-          ? selectedObject?.name ?? t('common.object')
-          : newObjName.trim() || manualAddress.trim() || newObjAddress.trim() || t('common.object'),
-      fallbackLat:
-        addressMode === 'existing' ? selectedObject?.lat : fallbackManualCoords?.lat,
-      fallbackLng:
-        addressMode === 'existing' ? selectedObject?.lng : fallbackManualCoords?.lng,
-    });
-    setPhotos((prev) => [...prev, watermarked]);
-    e.target.value = '';
+  const handlePhotoAdd = async (file: File) => {
+    setModalError(null);
+    setUploadingPhoto(true);
+    try {
+      const fallbackManualCoords =
+        addressMode === 'manual'
+          ? parseCoords(manualLat, manualLng)
+          : addressMode === 'newObject'
+            ? parseCoords(newObjLat, newObjLng)
+            : null;
+      const watermarked = await createWatermarkedPhoto(file, {
+        objectName:
+          addressMode === 'existing'
+            ? selectedObject?.name ?? t('common.object')
+            : newObjName.trim() || manualAddress.trim() || newObjAddress.trim() || t('common.object'),
+        fallbackLat:
+          addressMode === 'existing' ? selectedObject?.lat : fallbackManualCoords?.lat,
+        fallbackLng:
+          addressMode === 'existing' ? selectedObject?.lng : fallbackManualCoords?.lng,
+      });
+      setPhotos((prev) => [...prev, watermarked]);
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : 'Bild konnte nicht verarbeitet werden.');
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   const toggleBinType = (bin: BinType) => {
@@ -1104,21 +1110,16 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
           {/* Photo Attachment */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
               <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                 {t('createTask.attachPhoto')}
               </span>
-              <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
-                <Camera className="w-3.5 h-3.5 text-orange-500" />
-                <span>{t('createTask.choosePhoto')}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={handlePhotoAdd}
-                />
-              </label>
+              <PhotoUploadButtons
+                onSelectFile={handlePhotoAdd}
+                loading={uploadingPhoto}
+                loadingLabel={t('common.photoSending')}
+                compact
+              />
             </div>
             {photos.length > 0 && (
               <div className="flex gap-2 overflow-x-auto pt-1">

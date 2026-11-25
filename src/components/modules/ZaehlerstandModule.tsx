@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Camera,
   CheckCircle2,
   FileSpreadsheet,
   Gauge,
@@ -18,6 +17,7 @@ import { formatDateTimeDE } from '../../utils/dateUtils';
 import { exportMeterReadingsCSV } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { QRBarcodeScannerModal } from '../QRBarcodeScannerModal';
+import { PhotoUploadButtons } from '../PhotoUploadButtons';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 interface ZaehlerstandModuleProps {
@@ -67,6 +67,7 @@ export const ZaehlerstandModule: React.FC<ZaehlerstandModuleProps> = ({
   const [photo, setPhoto] = useState<TaskPhoto | undefined>(undefined);
   const [showScanner, setShowScanner] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
 
   useEffect(() => {
@@ -103,19 +104,24 @@ export const ZaehlerstandModule: React.FC<ZaehlerstandModuleProps> = ({
     setShowScanner(false);
   };
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedObject) return;
+  const handlePhotoUpload = async (file: File) => {
+    if (!selectedObject) return;
     setError(null);
-    const watermarked = await createWatermarkedPhoto(file, {
-      objectName: `${selectedObject.name} · ${apartment}`,
-      fallbackLat: selectedObject.lat,
-      fallbackLng: selectedObject.lng,
-      caption: `Zähler ${meterNumber || meterType}`,
-      extraStamp: readingValue ? `Stand: ${readingValue}` : undefined,
-    });
-    setPhoto(watermarked);
-    e.target.value = '';
+    setUploadingPhoto(true);
+    try {
+      const watermarked = await createWatermarkedPhoto(file, {
+        objectName: `${selectedObject.name} · ${apartment}`,
+        fallbackLat: selectedObject.lat,
+        fallbackLng: selectedObject.lng,
+        caption: `Zähler ${meterNumber || meterType}`,
+        extraStamp: readingValue ? `Stand: ${readingValue}` : undefined,
+      });
+      setPhoto(watermarked);
+    } catch {
+      setError(t('meters.errPhoto'));
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -331,17 +337,11 @@ export const ZaehlerstandModule: React.FC<ZaehlerstandModuleProps> = ({
             <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
               {t('meters.photoRequired')}
             </span>
-            <label className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-orange-500 px-3.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 cursor-pointer min-h-[42px]">
-              <Camera className="w-4 h-4 text-orange-500" />
-              <span>{photo ? t('meters.photoReplace') : t('meters.photoTake')}</span>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={handlePhotoUpload}
-              />
-            </label>
+            <PhotoUploadButtons
+              compact
+              loading={uploadingPhoto}
+              onSelectFile={handlePhotoUpload}
+            />
           </div>
           {photo && (
             <img

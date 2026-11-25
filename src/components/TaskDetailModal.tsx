@@ -1,11 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  Camera,
   Check,
   CheckCircle2,
   FileText,
-  ImagePlus,
   MapPin,
   PenTool,
   Plus,
@@ -25,6 +23,7 @@ import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { BIN_VISUAL_META } from '../utils/binMeta';
 import { exportTaskProtocolPDF } from '../utils/pdfExport';
+import { PhotoUploadButtons } from './PhotoUploadButtons';
 
 interface TaskDetailModalProps {
   task: FacilityTask;
@@ -101,12 +100,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     }
   };
 
-  const handlePhotoUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-    markCompleted = false
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handlePhotoUpload = async (file: File, markCompleted = false) => {
     setUploadingPhoto(true);
     try {
       const watermarked = await createWatermarkedPhoto(file, {
@@ -125,7 +119,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
       });
     } finally {
       setUploadingPhoto(false);
-      e.target.value = '';
     }
   };
 
@@ -445,29 +438,12 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   {t('taskModal.photosHint')}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer min-h-[40px]">
-                  <Camera className="w-3.5 h-3.5 text-orange-500" />
-                  <span>{t('common.camera')}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={(e) => handlePhotoUpload(e, false)}
-                  />
-                </label>
-                <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer min-h-[40px]">
-                  <ImagePlus className="w-3.5 h-3.5 text-slate-500" />
-                  <span>{t('common.gallery')}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => handlePhotoUpload(e, false)}
-                  />
-                </label>
-              </div>
+              <PhotoUploadButtons
+                onSelectFile={(file) => handlePhotoUpload(file, false)}
+                loading={uploadingPhoto}
+                loadingLabel={t('common.photoSending')}
+                compact
+              />
             </div>
 
             {uploadingPhoto && (
@@ -618,17 +594,12 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </button>
 
             {task.status !== 'erledigt' && (
-              <label className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white cursor-pointer transition-colors">
-                <Camera className="w-4 h-4" />
-                <span>{t('common.photoCompleteBtn')}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => handlePhotoUpload(e, true)}
-                />
-              </label>
+              <PhotoUploadButtons
+                onSelectFile={(file) => handlePhotoUpload(file, true)}
+                loading={uploadingPhoto}
+                loadingLabel={t('common.photoSending')}
+                variant="emerald"
+              />
             )}
           </div>
         </div>
