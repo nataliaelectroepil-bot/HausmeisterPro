@@ -1,10 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Check,
   CheckCircle2,
   FileSpreadsheet,
   Gauge,
+  Pencil,
   QrCode,
   Save,
+  Trash2,
+  X,
 } from 'lucide-react';
 import {
   MeterReading,
@@ -18,6 +22,7 @@ import { exportMeterReadingsCSV } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { QRBarcodeScannerModal } from '../QRBarcodeScannerModal';
 import { PhotoUploadButtons } from '../PhotoUploadButtons';
+import { DoubleDeleteConfirmModal } from '../DoubleDeleteConfirmModal';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 interface ZaehlerstandModuleProps {
@@ -27,6 +32,19 @@ interface ZaehlerstandModuleProps {
   readings: MeterReading[];
   initialObjectId?: string;
   onCreateReading: (reading: Omit<MeterReading, 'id'>) => Promise<void>;
+  onUpdateReading: (id: string, patch: Partial<Omit<MeterReading, 'id'>>) => Promise<void>;
+  onDeleteReading: (id: string) => Promise<void>;
+}
+
+function toDateTimeLocalValue(dateStr: string): string {
+  if (!dateStr) return new Date().toISOString().slice(0, 16);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(dateStr)) {
+    return dateStr.slice(0, 16);
+  }
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 16);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 const METER_TYPES: MeterType[] = [
@@ -54,6 +72,8 @@ export const ZaehlerstandModule: React.FC<ZaehlerstandModuleProps> = ({
   readings,
   initialObjectId,
   onCreateReading,
+  onUpdateReading,
+  onDeleteReading,
 }) => {
   const { t, tMeterType, docLanguage } = useTranslation();
   const [objectId, setObjectId] = useState<string>(
@@ -69,6 +89,17 @@ export const ZaehlerstandModule: React.FC<ZaehlerstandModuleProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
+
+  // Inline table row edit & double-confirm delete state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editMeterNumber, setEditMeterNumber] = useState<string>('');
+  const [editMeterType, setEditMeterType] = useState<MeterType>('Strom');
+  const [editPreviousValue, setEditPreviousValue] = useState<string>('0');
+  const [editReadingValue, setEditReadingValue] = useState<string>('0');
+  const [editReadDate, setEditReadDate] = useState<string>('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MeterReading | null>(null);
 
   useEffect(() => {
     if (initialObjectId) setObjectId(initialObjectId);
@@ -160,6 +191,46 @@ export const ZaehlerstandModule: React.FC<ZaehlerstandModuleProps> = ({
     if (Number.isNaN(cur) || Number.isNaN(prev)) return null;
     return Number((cur - prev).toFixed(2));
   }, [readingValue, previousValue]);
+
+  const startEditingRow = (r: MeterReading) => {
+    setEditingId(r.id);
+    setEditMeterNumber(r.meter_number);
+    setEditMeterType(r.meter_type);
+    setEditPreviousValue(String(r.previous_value));
+    setEditReadingValue(String(r.reading_value));
+    setEditReadDate(toDateTimeLocalValue(r.read_date));
+    setEditError(null);
+  };
+
+  const cancelEditingRow = () => {
+    setEditingId(null);
+    setEditError(null);
+  };
+
+  const saveEditingRow = async () => {
+    if (!editingId) return;
+    const trimmedNumber = editMeterNumber.trim();
+    const parsedPrev = parseFloat(editPreviousValue.replace(',', '.'));
+    const parsedCurr = parseFloat(editReadingValue.replace(',', '.'));
+    if (!trimmedNumber || Number.isNaN(parsedPrev) || Number.isNaN(parsedCurr) || !editReadDate) {
+      setEditError('Bitte gültige Zählernummer, Werte und Datum eingeben.');
+      return;
+    }
+    setEditError(null);
+    setSavingEdit(true);
+    try {
+      await onUpdateReading(editingId, {
+        meter_number: trimmedNumber,
+        meter_type: editMeterType,
+        previous_value: parsedPrev,
+        reading_value: parsedCurr,
+        read_date: editReadDate,
+      });
+      setEditingId(null);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -375,59 +446,205 @@ export const ZaehlerstandModule: React.FC<ZaehlerstandModuleProps> = ({
 
       {/* Readings Table */}
       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-            {t('meters.tableTitle', { count: readings.length })}
+            Erfasste Zählerstände ({readings.length})
           </h2>
+          {editError && (
+            <p className="text-xs font-semibold text-red-600 dark:text-red-400">{editError}</p>
+          )}
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs sm:text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-xs text-slate-500 dark:text-slate-400">
-                <th className="py-3 px-4 font-semibold">{t('meters.colObjUnit')}</th>
-                <th className="py-3 px-4 font-semibold">{t('meters.colNumType')}</th>
-                <th className="py-3 px-4 font-semibold text-right">{t('meters.colPrev')}</th>
-                <th className="py-3 px-4 font-semibold text-right">{t('meters.colCurr')}</th>
-                <th className="py-3 px-4 font-semibold text-right">{t('meters.colCons')}</th>
-                <th className="py-3 px-4 font-semibold">{t('meters.colDate')}</th>
+                <th className="py-3 px-4 font-semibold">Objekt / Einheit</th>
+                <th className="py-3 px-4 font-semibold">Zählernr. &amp; Art</th>
+                <th className="py-3 px-4 font-semibold text-right">Vorwert</th>
+                <th className="py-3 px-4 font-semibold text-right">Aktuell</th>
+                <th className="py-3 px-4 font-semibold text-right">Verbrauch</th>
+                <th className="py-3 px-4 font-semibold">Datum</th>
+                <th className="py-3 px-4 font-semibold text-right">Aktionen</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {readings.map((r) => {
-                const obj = objects.find((o) => o.id === r.object_id);
-                const diff = Number((r.reading_value - r.previous_value).toFixed(2));
-                return (
-                  <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="py-3 px-4">
-                      <p className="font-semibold text-slate-900 dark:text-white">
-                        {obj?.name ?? '—'}
-                      </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{r.apartment}</p>
-                    </td>
-                    <td className="py-3 px-4">
-                      <p className="font-mono text-xs font-bold text-slate-800 dark:text-slate-100">
-                        {r.meter_number}
-                      </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {tMeterType(r.meter_type)}
-                      </p>
-                    </td>
-                    <td className="py-3 px-4 font-mono text-right tabular-nums text-slate-500">
-                      {r.previous_value}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-right font-bold tabular-nums text-slate-900 dark:text-white">
-                      {r.reading_value}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-right font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                      +{diff}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-xs tabular-nums text-slate-500 whitespace-nowrap">
-                      {formatDateTimeDE(r.read_date)}
-                    </td>
-                  </tr>
-                );
-              })}
+              {readings.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="py-6 px-4 text-center text-xs sm:text-sm text-slate-500 dark:text-slate-400"
+                  >
+                    Keine Zählerstände vorhanden.
+                  </td>
+                </tr>
+              ) : (
+                readings.map((r) => {
+                  const obj = objects.find((o) => o.id === r.object_id);
+                  const isEditing = editingId === r.id;
+
+                  const livePrev = parseFloat(editPreviousValue.replace(',', '.'));
+                  const liveCurr = parseFloat(editReadingValue.replace(',', '.'));
+                  const liveDiff =
+                    isEditing && !Number.isNaN(livePrev) && !Number.isNaN(liveCurr)
+                      ? Number((liveCurr - livePrev).toFixed(2))
+                      : null;
+                  const diff = isEditing
+                    ? liveDiff
+                    : Number((r.reading_value - r.previous_value).toFixed(2));
+
+                  return (
+                    <tr
+                      key={r.id}
+                      className={
+                        isEditing
+                          ? 'bg-orange-50/40 dark:bg-orange-950/15'
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                      }
+                    >
+                      <td className="py-3 px-4 align-top">
+                        <p className="font-semibold text-slate-900 dark:text-white">
+                          {obj?.name ?? '—'}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{r.apartment}</p>
+                      </td>
+
+                      <td className="py-3 px-4 align-top">
+                        {isEditing ? (
+                          <div className="space-y-1.5 min-w-[155px]">
+                            <input
+                              type="text"
+                              value={editMeterNumber}
+                              onChange={(e) => setEditMeterNumber(e.target.value)}
+                              aria-label="Zählernummer"
+                              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                            />
+                            <select
+                              value={editMeterType}
+                              onChange={(e) => setEditMeterType(e.target.value as MeterType)}
+                              aria-label="Zählerart"
+                              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-900 dark:text-white"
+                            >
+                              {METER_TYPES.map((mt) => (
+                                <option key={mt} value={mt}>
+                                  {mt}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="font-mono text-xs font-bold text-slate-800 dark:text-slate-100">
+                              {r.meter_number}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {r.meter_type}
+                            </p>
+                          </>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4 align-top font-mono text-right tabular-nums text-slate-500">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editPreviousValue}
+                            onChange={(e) => setEditPreviousValue(e.target.value)}
+                            aria-label="Vorwert"
+                            className="w-24 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-right font-mono text-xs text-slate-900 dark:text-white"
+                          />
+                        ) : (
+                          r.previous_value
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4 align-top font-mono text-right font-bold tabular-nums text-slate-900 dark:text-white">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editReadingValue}
+                            onChange={(e) => setEditReadingValue(e.target.value)}
+                            aria-label="Aktueller Zählerstand"
+                            className="w-24 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-right font-mono text-xs font-bold text-slate-900 dark:text-white"
+                          />
+                        ) : (
+                          r.reading_value
+                        )}
+                      </td>
+
+                      <td
+                        className={`py-3 px-4 align-top font-mono text-right font-semibold tabular-nums whitespace-nowrap ${
+                          diff !== null && diff < 0
+                            ? 'text-red-600 dark:text-red-400'
+                            : 'text-emerald-600 dark:text-emerald-400'
+                        }`}
+                      >
+                        {diff === null ? '—' : diff >= 0 ? `+${diff}` : `${diff}`}
+                      </td>
+
+                      <td className="py-3 px-4 align-top font-mono text-xs tabular-nums text-slate-500 whitespace-nowrap">
+                        {isEditing ? (
+                          <input
+                            type="datetime-local"
+                            value={editReadDate}
+                            onChange={(e) => setEditReadDate(e.target.value)}
+                            aria-label="Ablesedatum"
+                            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 font-mono text-xs text-slate-900 dark:text-white"
+                          />
+                        ) : (
+                          formatDateTimeDE(r.read_date)
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4 align-top text-right whitespace-nowrap">
+                        {isEditing ? (
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              disabled={savingEdit}
+                              onClick={() => void saveEditingRow()}
+                              className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors cursor-pointer"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Speichern</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={savingEdit}
+                              onClick={cancelEditingRow}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-60 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Abbrechen</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => startEditingRow(r)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              <span>Bearbeiten</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(r)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/60 px-2.5 py-1.5 text-xs font-semibold text-red-700 dark:text-red-300 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Löschen</span>
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -450,6 +667,26 @@ export const ZaehlerstandModule: React.FC<ZaehlerstandModuleProps> = ({
           onClose={() => setShowScanner(false)}
         />
       )}
+
+      <DoubleDeleteConfirmModal
+        isOpen={deleteTarget !== null}
+        detail={
+          deleteTarget
+            ? `${objects.find((o) => o.id === deleteTarget.object_id)?.name ?? '—'} · ${deleteTarget.meter_number} (${deleteTarget.meter_type}) · ${formatDateTimeDE(deleteTarget.read_date)}`
+            : undefined
+        }
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          const idToDelete = deleteTarget.id;
+          await onDeleteReading(idToDelete);
+          if (editingId === idToDelete) {
+            setEditingId(null);
+            setEditError(null);
+          }
+          setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 };

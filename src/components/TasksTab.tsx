@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Calendar,
   CheckCircle2,
   ClipboardCheck,
   Clock,
@@ -8,6 +9,7 @@ import {
   Loader2,
   MapPin,
   Search,
+  X,
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 import { useTaskTranslation } from '../i18n/TaskTranslationContext';
@@ -18,7 +20,11 @@ import {
   TaskStatus,
   User,
 } from '../types/facility';
-import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
+import {
+  formatDateTimeDE,
+  isOpenTaskForTomorrow,
+  isTaskOverdue,
+} from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { BIN_VISUAL_META } from '../utils/binMeta';
 import { exportTaskProtocolPDF } from '../utils/pdfExport';
@@ -28,6 +34,8 @@ interface TasksTabProps {
   tasks: FacilityTask[];
   objects: PropertyObject[];
   users: User[];
+  tomorrowOnlyFilter?: boolean;
+  onClearTomorrowFilter?: () => void;
   onOpenTaskDetail: (task: FacilityTask) => void;
   onQuickCompleteWithPhoto: (
     task: FacilityTask,
@@ -49,6 +57,8 @@ export const TasksTab: React.FC<TasksTabProps> = ({
   tasks,
   objects,
   users,
+  tomorrowOnlyFilter = false,
+  onClearTomorrowFilter,
   onOpenTaskDetail,
   onQuickCompleteWithPhoto,
   onCompleteWithoutPhoto,
@@ -64,9 +74,22 @@ export const TasksTab: React.FC<TasksTabProps> = ({
   const [completeError, setCompleteError] = useState<string | null>(null);
   const [exportingPdfId, setExportingPdfId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (tomorrowOnlyFilter) {
+      setSelectedCategory('Alle');
+      setSelectedStatus('offen');
+      setSearchQuery('');
+    }
+  }, [tomorrowOnlyFilter]);
+
+  const baseTasks = useMemo(
+    () => (tomorrowOnlyFilter ? tasks.filter(isOpenTaskForTomorrow) : tasks),
+    [tasks, tomorrowOnlyFilter]
+  );
+
   const categoryFiltered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return tasks.filter((tItem) => {
+    return baseTasks.filter((tItem) => {
       if (selectedCategory !== 'Alle' && tItem.category !== selectedCategory) return false;
       if (!q) return true;
       const obj = objects.find((o) => o.id === tItem.object_id);
@@ -81,7 +104,7 @@ export const TasksTab: React.FC<TasksTabProps> = ({
         (obj?.address.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [tasks, objects, selectedCategory, searchQuery, getTaskTitle, getTaskDescription]);
+  }, [baseTasks, objects, selectedCategory, searchQuery, getTaskTitle, getTaskDescription]);
 
   const counts = useMemo(() => {
     return {
@@ -235,7 +258,12 @@ export const TasksTab: React.FC<TasksTabProps> = ({
 
         <button
           type="button"
-          onClick={() => setSelectedStatus('in_bearbeitung')}
+          onClick={() => {
+            if (tomorrowOnlyFilter && onClearTomorrowFilter) {
+              onClearTomorrowFilter();
+            }
+            setSelectedStatus('in_bearbeitung');
+          }}
           className={`flex items-center justify-center gap-2 rounded-xl py-2.5 px-3 text-xs sm:text-sm font-semibold transition-colors cursor-pointer min-h-[44px] ${
             selectedStatus === 'in_bearbeitung'
               ? 'bg-amber-500 text-slate-950'
@@ -256,7 +284,12 @@ export const TasksTab: React.FC<TasksTabProps> = ({
 
         <button
           type="button"
-          onClick={() => setSelectedStatus('erledigt')}
+          onClick={() => {
+            if (tomorrowOnlyFilter && onClearTomorrowFilter) {
+              onClearTomorrowFilter();
+            }
+            setSelectedStatus('erledigt');
+          }}
           className={`flex items-center justify-center gap-2 rounded-xl py-2.5 px-3 text-xs sm:text-sm font-semibold transition-colors cursor-pointer min-h-[44px] ${
             selectedStatus === 'erledigt'
               ? 'bg-emerald-600 text-white'
@@ -276,6 +309,26 @@ export const TasksTab: React.FC<TasksTabProps> = ({
         </button>
       </div>
 
+      {/* Active Tomorrow Filter Pill */}
+      {tomorrowOnlyFilter && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 dark:border-amber-700/70 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5">
+          <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-amber-950 dark:text-amber-100">
+            <Calendar className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>{t('tasks.tomorrowFilterLabel', { count: visibleTasks.length })}</span>
+          </div>
+          {onClearTomorrowFilter && (
+            <button
+              type="button"
+              onClick={onClearTomorrowFilter}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 hover:bg-amber-100 dark:hover:bg-amber-900/50 px-2.5 py-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200 transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>{t('tasks.resetFilter')}</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Task Cards Grid */}
       {visibleTasks.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-10 text-center">
@@ -286,6 +339,16 @@ export const TasksTab: React.FC<TasksTabProps> = ({
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             {t('tasks.emptySub')}
           </p>
+          {tomorrowOnlyFilter && onClearTomorrowFilter && (
+            <button
+              type="button"
+              onClick={onClearTomorrowFilter}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>{t('tasks.resetFilter')}</span>
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

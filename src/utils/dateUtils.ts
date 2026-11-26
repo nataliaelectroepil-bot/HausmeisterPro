@@ -78,13 +78,30 @@ export function isTaskOverdue(dueDate: string, status: TaskStatus): boolean {
 }
 
 export function isDateTomorrow(dueDate: string): boolean {
-  const d = dueDate.slice(0, 10);
+  if (!dueDate) return false;
+  let datePart = dueDate.slice(0, 10);
+  if (/(Z|[+-]\d{2}:\d{2})$/i.test(dueDate)) {
+    const parsed = new Date(dueDate);
+    if (!Number.isNaN(parsed.getTime())) {
+      const py = parsed.getFullYear();
+      const pm = String(parsed.getMonth() + 1).padStart(2, '0');
+      const pd = String(parsed.getDate()).padStart(2, '0');
+      datePart = `${py}-${pm}-${pd}`;
+    }
+  }
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const y = tomorrow.getFullYear();
   const m = String(tomorrow.getMonth() + 1).padStart(2, '0');
   const day = String(tomorrow.getDate()).padStart(2, '0');
-  return d === `${y}-${m}-${day}`;
+  return datePart === `${y}-${m}-${day}`;
+}
+
+export function isOpenTaskForTomorrow(task: {
+  status: TaskStatus;
+  due_date: string;
+}): boolean {
+  return task.status === 'offen' && isDateTomorrow(task.due_date);
 }
 
 export function getISOWeekAndYear(dateInput: Date | string): { kw: number; year: number } {

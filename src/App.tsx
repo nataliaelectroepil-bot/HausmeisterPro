@@ -41,7 +41,11 @@ import {
   User,
   WinterLog,
 } from './types/facility';
-import { getISOWeekAndYear, isDateTomorrow, isTaskOverdue } from './utils/dateUtils';
+import {
+  getISOWeekAndYear,
+  isOpenTaskForTomorrow,
+  isTaskOverdue,
+} from './utils/dateUtils';
 import { captureCurrentPosition } from './utils/geolocation';
 
 function LoadingScreen() {
@@ -100,6 +104,7 @@ export default function App() {
     }
   });
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [tasksTomorrowFilter, setTasksTomorrowFilter] = useState(false);
 
   // Modals
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -150,8 +155,9 @@ export default function App() {
       authenticatedUser && !u.some((usr) => usr.id === authenticatedUser.id)
         ? [...u, authenticatedUser]
         : u;
+    const cleanedObjects = await pocketbaseService.cleanupObjectsWithTasks(o, t);
     setUsers(mergedUsers);
-    setObjects(o);
+    setObjects(cleanedObjects);
     setTasks(t);
     setBinSchedules(b);
     setTimeEntries(te);
@@ -237,10 +243,14 @@ export default function App() {
   );
 
   const tomorrowOpenCount = useMemo(
-    () =>
-      tasks.filter((t) => t.status !== 'erledigt' && isDateTomorrow(t.due_date)).length,
+    () => tasks.filter(isOpenTaskForTomorrow).length,
     [tasks]
   );
+
+  const handleNavigateTab = useCallback((tab: ActiveTab) => {
+    setTasksTomorrowFilter(false);
+    setActiveTab(tab);
+  }, []);
 
   const pendingBinsThisWeek = useMemo(() => {
     const { kw, year } = getISOWeekAndYear(new Date());
@@ -409,6 +419,19 @@ export default function App() {
     setMeterReadings(updated);
   }, []);
 
+  const handleUpdateMeterReading = useCallback(
+    async (id: string, patch: Partial<Omit<MeterReading, 'id'>>) => {
+      const updated = await pocketbaseService.updateMeterReading(id, patch);
+      setMeterReadings(updated);
+    },
+    []
+  );
+
+  const handleDeleteMeterReading = useCallback(async (id: string) => {
+    const updated = await pocketbaseService.deleteMeterReading(id);
+    setMeterReadings(updated);
+  }, []);
+
   const handleCreateHandoverProtocol = useCallback(
     async (protocol: Omit<HandoverProtocol, 'id' | 'created_at'>) => {
       const { created, all } = await pocketbaseService.createHandoverProtocol(protocol);
@@ -425,6 +448,11 @@ export default function App() {
 
   const handleCreateGardenLog = useCallback(async (log: Omit<GardenLog, 'id'>) => {
     const updated = await pocketbaseService.createGardenLog(log);
+    setGardenLogs(updated);
+  }, []);
+
+  const handleDeleteGardenLog = useCallback(async (id: string) => {
+    const updated = await pocketbaseService.deleteGardenLog(id);
     setGardenLogs(updated);
   }, []);
 
@@ -495,7 +523,7 @@ export default function App() {
           setShowCreateTaskModal(true);
         }}
         onLogout={handleLogout}
-        onNavigateTab={setActiveTab}
+        onNavigateTab={handleNavigateTab}
         activeTab={activeTab}
       />
 
@@ -504,14 +532,17 @@ export default function App() {
           tomorrowCount={tomorrowOpenCount}
           overdueCount={overdueCount}
           onDismiss={() => setBannerDismissed(true)}
-          onViewTasks={() => setActiveTab('aufgaben')}
+          onViewTasks={() => {
+            setTasksTomorrowFilter(tomorrowOpenCount > 0);
+            setActiveTab('aufgaben');
+          }}
         />
       )}
 
       <div className="flex-1 flex min-h-0">
         <DesktopSidebar
           activeTab={activeTab}
-          onSelectTab={setActiveTab}
+          onSelectTab={handleNavigateTab}
           currentUser={currentUser}
           openTasksCount={openTasksCount}
           overdueCount={overdueCount}
@@ -538,6 +569,8 @@ export default function App() {
                 tasks={tasks}
                 objects={objects}
                 users={users}
+                tomorrowOnlyFilter={tasksTomorrowFilter}
+                onClearTomorrowFilter={() => setTasksTomorrowFilter(false)}
                 onOpenTaskDetail={(task) => setSelectedTaskId(task.id)}
                 onQuickCompleteWithPhoto={handleQuickCompleteWithPhoto}
                 onCompleteWithoutPhoto={(task) =>
@@ -619,6 +652,8 @@ export default function App() {
                 readings={meterReadings}
                 initialObjectId={moduleObjectId}
                 onCreateReading={handleCreateMeterReading}
+                onUpdateReading={handleUpdateMeterReading}
+                onDeleteReading={handleDeleteMeterReading}
               />
             )}
 
@@ -655,6 +690,7 @@ export default function App() {
                 logs={gardenLogs}
                 initialObjectId={moduleObjectId}
                 onCreateLog={handleCreateGardenLog}
+                onDeleteLog={handleDeleteGardenLog}
               />
             )}
           </div>
@@ -663,7 +699,7 @@ export default function App() {
 
       <BottomNav
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={handleNavigateTab}
         onOpenModules={() => {
           setDrawerDefaultObjectId(undefined);
           setShowModulesDrawer(true);

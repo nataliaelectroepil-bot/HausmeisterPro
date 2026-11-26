@@ -4,6 +4,7 @@ import {
   FileDown,
   Save,
   Sprout,
+  Trash2,
 } from 'lucide-react';
 import {
   GardenLog,
@@ -16,6 +17,7 @@ import { formatDateDE, getTodayISODate } from '../../utils/dateUtils';
 import { exportGardenBillingPDF } from '../../utils/pdfExport';
 import { createWatermarkedPhoto } from '../../utils/photoWatermark';
 import { PhotoUploadButtons } from '../PhotoUploadButtons';
+import { DoubleDeleteConfirmModal } from '../DoubleDeleteConfirmModal';
 import { useTranslation } from '../../i18n/LanguageContext';
 
 interface GartenModuleProps {
@@ -25,6 +27,7 @@ interface GartenModuleProps {
   logs: GardenLog[];
   initialObjectId?: string;
   onCreateLog: (log: Omit<GardenLog, 'id'>) => Promise<void>;
+  onDeleteLog: (id: string) => Promise<void>;
 }
 
 const GARDEN_TASKS = [
@@ -42,6 +45,7 @@ export const GartenModule: React.FC<GartenModuleProps> = ({
   logs,
   initialObjectId,
   onCreateLog,
+  onDeleteLog,
 }) => {
   const { t, tGardenTask, docLanguage } = useTranslation();
   const [objectId, setObjectId] = useState<string>(
@@ -61,6 +65,7 @@ export const GartenModule: React.FC<GartenModuleProps> = ({
   const [afterPhoto, setAfterPhoto] = useState<TaskPhoto | undefined>(undefined);
   const [uploadingKind, setUploadingKind] = useState<'before' | 'after' | null>(null);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<GardenLog | null>(null);
 
   useEffect(() => {
     if (initialObjectId) setObjectId(initialObjectId);
@@ -387,42 +392,74 @@ export const GartenModule: React.FC<GartenModuleProps> = ({
       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800">
           <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-            {t('garden.historyTitle', { count: logs.length })}
+            Protokollierte Pflegeeinsätze ({logs.length})
           </h2>
         </div>
 
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {logs.map((log) => {
-            const obj = objects.find((o) => o.id === log.object_id);
-            const worker = users.find((u) => u.id === log.user_id);
-            return (
-              <div
-                key={log.id}
-                className="p-4 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-              >
-                <div>
-                  <p className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
-                    {formatDateDE(log.date)} · {log.duration_minutes} {t('common.min')} ·{' '}
-                    {worker?.name ?? t('common.worker')}
-                  </p>
-                  <p className="text-sm font-bold text-slate-900 dark:text-white">
-                    {obj?.name ?? t('common.object')} —{' '}
-                    {log.tasks_json.map(tGardenTask).join(', ')}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {t('garden.materialSummary', {
-                      d: log.materials_json.duenger_kg,
-                      s: log.materials_json.rasensamen_kg,
-                      m: log.materials_json.rindenmulch_saecke,
-                      w: log.waste_volume,
-                    })}
-                  </p>
+          {logs.length === 0 ? (
+            <div className="p-6 text-center text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+              Keine Pflegeeinsätze protokolliert.
+            </div>
+          ) : (
+            logs.map((log) => {
+              const obj = objects.find((o) => o.id === log.object_id);
+              const worker = users.find((u) => u.id === log.user_id);
+              return (
+                <div
+                  key={log.id}
+                  className="p-4 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
+                      {formatDateDE(log.date)} · {log.duration_minutes} Min. ·{' '}
+                      {worker?.name ?? 'Mitarbeiter'}
+                    </p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white">
+                      {obj?.name ?? 'Objekt'} — {log.tasks_json.join(', ')}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {t('garden.materialSummary', {
+                        d: log.materials_json.duenger_kg,
+                        s: log.materials_json.rasensamen_kg,
+                        m: log.materials_json.rindenmulch_saecke,
+                        w: log.waste_volume,
+                      })}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-end shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(log)}
+                      aria-label="Pflegeeinsatz löschen"
+                      className="flex items-center gap-1.5 rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/60 px-3 py-2 text-xs font-semibold text-red-700 dark:text-red-300 transition-colors cursor-pointer min-h-[38px]"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Löschen</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </div>
+
+      <DoubleDeleteConfirmModal
+        isOpen={deleteTarget !== null}
+        detail={
+          deleteTarget
+            ? `${objects.find((o) => o.id === deleteTarget.object_id)?.name ?? 'Objekt'} · ${formatDateDE(deleteTarget.date)} (${deleteTarget.tasks_json.join(', ')})`
+            : undefined
+        }
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await onDeleteLog(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 };

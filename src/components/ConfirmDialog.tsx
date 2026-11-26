@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, Loader2, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, X } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 
 interface ConfirmDialogProps {
@@ -8,6 +8,7 @@ interface ConfirmDialogProps {
   detail?: string;
   confirmLabel: string;
   cancelLabel?: string;
+  variant?: 'amber' | 'emerald';
   loading?: boolean;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
@@ -19,6 +20,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   detail,
   confirmLabel,
   cancelLabel,
+  variant = 'amber',
   loading = false,
   onConfirm,
   onCancel,
@@ -41,7 +43,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
+            <div
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                variant === 'emerald'
+                  ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400'
+              }`}
+            >
               <AlertTriangle className="w-5 h-5" />
             </div>
             <h3
@@ -86,10 +94,16 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             type="button"
             disabled={loading}
             onClick={() => void onConfirm()}
-            className="flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-60 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white transition-colors cursor-pointer min-h-[44px]"
+            className={`flex items-center gap-1.5 rounded-xl disabled:opacity-60 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white transition-colors cursor-pointer min-h-[44px] ${
+              variant === 'emerald'
+                ? 'bg-emerald-600 hover:bg-emerald-700'
+                : 'bg-amber-600 hover:bg-amber-700'
+            }`}
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
+            ) : variant === 'emerald' ? (
+              <CheckCircle2 className="w-4 h-4" />
             ) : (
               <RotateCcw className="w-4 h-4" />
             )}

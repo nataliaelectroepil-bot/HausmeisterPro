@@ -209,6 +209,8 @@ const DE = {
   'tasks.completeModalPhotoHint': 'Wählen Sie eine Fotoquelle für den Nachweis:',
   'tasks.continueWithoutPhoto': 'Ohne Foto fortfahren',
   'tasks.completing': 'Wird abgeschlossen...',
+  'tasks.tomorrowFilterLabel': 'Filter: Aufgaben für morgen ({count})',
+  'tasks.resetFilter': 'Filter zurücksetzen',
 
   // Task Detail Modal
   'taskModal.objectAddress': 'Objekt & Adresse',
@@ -244,10 +246,17 @@ const DE = {
   'confirm.resetBinStatusTitle': 'Status zurücksetzen?',
   'confirm.resetBinStatusMessage': 'Status wirklich zurücksetzen?',
   'confirm.resetBinStatusConfirm': 'Zurücksetzen',
+  'confirm.withoutPhotoTitle': 'Ohne Foto fortfahren',
+  'confirm.withoutPhotoMessage': 'Sicher ohne Foto fortfahren?',
+  'confirm.withoutPhotoConfirm': 'Ja, fortfahren',
   'taskModal.edit': 'Bearbeiten',
   'taskModal.editModeActive': 'Bearbeitungsmodus aktiv',
   'taskModal.readOnlyLocked': 'Abgeschlossene Aufgabe (Schreibgeschützt)',
   'taskModal.noSignature': 'Keine Unterschrift hinterlegt',
+  'taskModal.addPhoto': 'Foto hinzufügen',
+  'taskModal.photoCompleteBtn': 'Foto / Abschließen',
+  'taskModal.photoSectionModalHint':
+    'Foto für die Dokumentation mit der Kamera aufnehmen, aus der Galerie wählen oder ohne Foto fortfahren.',
 
   // Create Task Modal
   'createTask.title': 'Neue Aufgabe anlegen',
@@ -721,6 +730,8 @@ const EN: Record<TranslationKey, string> = {
   'tasks.completeModalPhotoHint': 'Choose a photo source for proof:',
   'tasks.continueWithoutPhoto': 'Continue without photo',
   'tasks.completing': 'Completing...',
+  'tasks.tomorrowFilterLabel': 'Filter: Tasks for tomorrow ({count})',
+  'tasks.resetFilter': 'Reset filter',
 
   'taskModal.objectAddress': 'Property & Address',
   'taskModal.unknownObject': 'Unknown Property',
@@ -755,10 +766,17 @@ const EN: Record<TranslationKey, string> = {
   'confirm.resetBinStatusTitle': 'Reset status?',
   'confirm.resetBinStatusMessage': 'Really reset this status?',
   'confirm.resetBinStatusConfirm': 'Reset',
+  'confirm.withoutPhotoTitle': 'Continue Without Photo',
+  'confirm.withoutPhotoMessage': 'Are you sure you want to continue without a photo?',
+  'confirm.withoutPhotoConfirm': 'Yes, Continue',
   'taskModal.edit': 'Edit',
   'taskModal.editModeActive': 'Edit mode active',
   'taskModal.readOnlyLocked': 'Completed task (Read-only)',
   'taskModal.noSignature': 'No signature recorded',
+  'taskModal.addPhoto': 'Add Photo',
+  'taskModal.photoCompleteBtn': 'Photo / Complete',
+  'taskModal.photoSectionModalHint':
+    'Take a photo with the camera, choose from the gallery, or continue without a photo.',
 
   'createTask.title': 'Create New Task',
   'createTask.jobType': 'Service Category',
@@ -1219,6 +1237,8 @@ const HR: Record<TranslationKey, string> = {
   'tasks.completeModalPhotoHint': 'Odaberite izvor fotografije za dokaz:',
   'tasks.continueWithoutPhoto': 'Nastavi bez fotografije',
   'tasks.completing': 'Završavanje...',
+  'tasks.tomorrowFilterLabel': 'Filter: Zadaci za sutra ({count})',
+  'tasks.resetFilter': 'Poništi filter',
 
   'taskModal.objectAddress': 'Objekt i adresa',
   'taskModal.unknownObject': 'Nepoznat objekt',
@@ -1253,10 +1273,17 @@ const HR: Record<TranslationKey, string> = {
   'confirm.resetBinStatusTitle': 'Poništiti status?',
   'confirm.resetBinStatusMessage': 'Želite li zaista poništiti status?',
   'confirm.resetBinStatusConfirm': 'Poništi',
+  'confirm.withoutPhotoTitle': 'Nastavi bez fotografije',
+  'confirm.withoutPhotoMessage': 'Sigurno želite nastaviti bez fotografije?',
+  'confirm.withoutPhotoConfirm': 'Da, nastavi',
   'taskModal.edit': 'Uredi',
   'taskModal.editModeActive': 'Način uređivanja aktivan',
   'taskModal.readOnlyLocked': 'Završeni zadatak (Samo za čitanje)',
   'taskModal.noSignature': 'Potpis nije zabilježen',
+  'taskModal.addPhoto': 'Dodaj fotografiju',
+  'taskModal.photoCompleteBtn': 'Foto / Završi',
+  'taskModal.photoSectionModalHint':
+    'Snimite fotografiju kamerom, odaberite iz galerije ili nastavite bez fotografije.',
 
   'createTask.title': 'Novi radni zadatak',
   'createTask.jobType': 'Vrsta posla',
@@ -1717,6 +1744,8 @@ const SQ: Record<TranslationKey, string> = {
   'tasks.completeModalPhotoHint': 'Zgjidhni burimin e fotos për provë:',
   'tasks.continueWithoutPhoto': 'Vazhdo pa foto',
   'tasks.completing': 'Duke përfunduar...',
+  'tasks.tomorrowFilterLabel': 'Filtri: Detyrat për nesër ({count})',
+  'tasks.resetFilter': 'Rivendos filtrin',
 
   'taskModal.objectAddress': 'Objekti dhe adresa',
   'taskModal.unknownObject': 'Objekt i panjohur',
@@ -1751,10 +1780,17 @@ const SQ: Record<TranslationKey, string> = {
   'confirm.resetBinStatusTitle': 'Ta rivendosni statusin?',
   'confirm.resetBinStatusMessage': 'A jeni të sigurt që dëshironi ta rivendosni statusin?',
   'confirm.resetBinStatusConfirm': 'Rivendos',
+  'confirm.withoutPhotoTitle': 'Vazhdo pa foto',
+  'confirm.withoutPhotoMessage': 'Jeni të sigurt që dëshironi të vazhdoni pa foto?',
+  'confirm.withoutPhotoConfirm': 'Po, vazhdo',
   'taskModal.edit': 'Ndrysho',
   'taskModal.editModeActive': 'Modaliteti i redaktimit aktiv',
   'taskModal.readOnlyLocked': 'Detyrë e përfunduar (Vetëm për lexim)',
   'taskModal.noSignature': 'Nuk ka nënshkrim të regjistruar',
+  'taskModal.addPhoto': 'Shto foto',
+  'taskModal.photoCompleteBtn': 'Foto / Përfundo',
+  'taskModal.photoSectionModalHint':
+    'Bëni foto me kamerë, zgjidhni nga galeria ose vazhdoni pa foto.',
 
   'createTask.title': 'Krijo detyrë të re',
   'createTask.jobType': 'Lloji i punës',
@@ -2215,6 +2251,8 @@ const PL: Record<TranslationKey, string> = {
   'tasks.completeModalPhotoHint': 'Wybierz źródło zdjęcia jako dowód:',
   'tasks.continueWithoutPhoto': 'Kontynuuj bez zdjęcia',
   'tasks.completing': 'Zapisywanie...',
+  'tasks.tomorrowFilterLabel': 'Filtr: Zadania na jutro ({count})',
+  'tasks.resetFilter': 'Resetuj filtr',
 
   'taskModal.objectAddress': 'Obiekt i adres',
   'taskModal.unknownObject': 'Nieznany obiekt',
@@ -2249,10 +2287,17 @@ const PL: Record<TranslationKey, string> = {
   'confirm.resetBinStatusTitle': 'Zresetować status?',
   'confirm.resetBinStatusMessage': 'Czy na pewno zresetować status?',
   'confirm.resetBinStatusConfirm': 'Zresetuj',
+  'confirm.withoutPhotoTitle': 'Kontynuuj bez zdjęcia',
+  'confirm.withoutPhotoMessage': 'Czy na pewno chcesz kontynuować bez zdjęcia?',
+  'confirm.withoutPhotoConfirm': 'Tak, kontynuuj',
   'taskModal.edit': 'Edytuj',
   'taskModal.editModeActive': 'Tryb edycji aktywny',
   'taskModal.readOnlyLocked': 'Zadanie ukończone (Tylko do odczytu)',
   'taskModal.noSignature': 'Brak złożonego podpisu',
+  'taskModal.addPhoto': 'Dodaj zdjęcie',
+  'taskModal.photoCompleteBtn': 'Zdjęcie / Zakończ',
+  'taskModal.photoSectionModalHint':
+    'Zrób zdjęcie aparatem, wybierz z galerii lub kontynuuj bez zdjęcia.',
 
   'createTask.title': 'Utwórz nowe zadanie',
   'createTask.jobType': 'Rodzaj pracy',
@@ -2713,6 +2758,8 @@ const TR: Record<TranslationKey, string> = {
   'tasks.completeModalPhotoHint': 'Kanıt için bir fotoğraf kaynağı seçin:',
   'tasks.continueWithoutPhoto': 'Fotoğrafsız devam et',
   'tasks.completing': 'Tamamlanıyor...',
+  'tasks.tomorrowFilterLabel': 'Filtre: Yarınki görevler ({count})',
+  'tasks.resetFilter': 'Filtreyi sıfırla',
 
   'taskModal.objectAddress': 'Bina ve Adres',
   'taskModal.unknownObject': 'Bilinmeyen Bina',
@@ -2747,10 +2794,17 @@ const TR: Record<TranslationKey, string> = {
   'confirm.resetBinStatusTitle': 'Durum sıfırlansın mı?',
   'confirm.resetBinStatusMessage': 'Durum gerçekten sıfırlansın mı?',
   'confirm.resetBinStatusConfirm': 'Sıfırla',
+  'confirm.withoutPhotoTitle': 'Fotoğrafsız Devam Et',
+  'confirm.withoutPhotoMessage': 'Fotoğrafsız devam etmek istediğinizden emin misiniz?',
+  'confirm.withoutPhotoConfirm': 'Evet, devam et',
   'taskModal.edit': 'Düzenle',
   'taskModal.editModeActive': 'Düzenleme modu aktif',
   'taskModal.readOnlyLocked': 'Tamamlanan görev (Salt okunur)',
   'taskModal.noSignature': 'Kayıtlı imza yok',
+  'taskModal.addPhoto': 'Fotoğraf Ekle',
+  'taskModal.photoCompleteBtn': 'Fotoğraf / Tamamla',
+  'taskModal.photoSectionModalHint':
+    'Kamerayla fotoğraf çekin, galeriden seçin veya fotoğrafsız devam edin.',
 
   'createTask.title': 'Yeni Görev Oluştur',
   'createTask.jobType': 'İş Kategorisi',
@@ -3211,6 +3265,8 @@ const RU: Record<TranslationKey, string> = {
   'tasks.completeModalPhotoHint': 'Выберите источник фото для подтверждения:',
   'tasks.continueWithoutPhoto': 'Продолжить без фото',
   'tasks.completing': 'Завершение...',
+  'tasks.tomorrowFilterLabel': 'Фильтр: Задачи на завтра ({count})',
+  'tasks.resetFilter': 'Сбросить фильтр',
 
   'taskModal.objectAddress': 'Объект и адрес',
   'taskModal.unknownObject': 'Неизвестный объект',
@@ -3245,10 +3301,17 @@ const RU: Record<TranslationKey, string> = {
   'confirm.resetBinStatusTitle': 'Сбросить статус?',
   'confirm.resetBinStatusMessage': 'Вы действительно хотите сбросить статус?',
   'confirm.resetBinStatusConfirm': 'Сбросить',
+  'confirm.withoutPhotoTitle': 'Продолжить без фото',
+  'confirm.withoutPhotoMessage': 'Вы уверены, что хотите продолжить без фото?',
+  'confirm.withoutPhotoConfirm': 'Да, продолжить',
   'taskModal.edit': 'Редактировать',
   'taskModal.editModeActive': 'Режим редактирования',
   'taskModal.readOnlyLocked': 'Завершённая задача (Только чтение)',
   'taskModal.noSignature': 'Подпись отсутствует',
+  'taskModal.addPhoto': 'Добавить фото',
+  'taskModal.photoCompleteBtn': 'Фото / Завершить',
+  'taskModal.photoSectionModalHint':
+    'Сделайте фото камерой, выберите из галереи или продолжите без фото.',
 
   'createTask.title': 'Создать новую задачу',
   'createTask.jobType': 'Тип работы',

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Camera,
   Check,
   CheckCircle2,
   FileText,
@@ -28,8 +29,8 @@ import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { BIN_VISUAL_META } from '../utils/binMeta';
 import { exportTaskProtocolPDF } from '../utils/pdfExport';
+import { CompleteTaskModal } from './CompleteTaskModal';
 import { ConfirmDialog } from './ConfirmDialog';
-import { PhotoUploadButtons } from './PhotoUploadButtons';
 
 interface TaskDetailModalProps {
   task: FacilityTask;
@@ -68,6 +69,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [savingChanges, setSavingChanges] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoModalMode, setPhotoModalMode] = useState<'photo' | 'complete' | null>(null);
+  const [photoModalError, setPhotoModalError] = useState<string | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<TaskPhoto | null>(null);
   const [pendingReopenStatus, setPendingReopenStatus] = useState<TaskStatus | null>(null);
@@ -93,6 +96,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     setNewCheckItem('');
     setSavedNotice(false);
     setPendingReopenStatus(null);
+    setPhotoModalMode(null);
+    setPhotoModalError(null);
   }, [task.id]);
 
   const isReadOnly = task.status === 'erledigt' && !isEditing;
@@ -119,8 +124,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     hasChecklistChanged ||
     hasPhotosChanged ||
     hasSignatureChanged;
-
-  const showEditFooter = isEditing || hasUnsavedChanges;
 
   const overdue = isTaskOverdue(task.due_date, draftStatus);
   const completedChecks = draftChecklist.filter((c) => c.checked).length;
@@ -204,9 +207,18 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     onClose();
   };
 
+  const getPendingSignature = () => {
+    const pendingDrawnDataUrl =
+      !draftSignature && hasDrawnSignature && canvasRef.current
+        ? canvasRef.current.toDataURL('image/png')
+        : undefined;
+    return draftSignature ?? pendingDrawnDataUrl;
+  };
+
   const handlePhotoUpload = async (file: File, markCompleted = false) => {
     if (isReadOnly && !markCompleted) return;
     setUploadingPhoto(true);
+    setPhotoModalError(null);
     try {
       const watermarked = await createWatermarkedPhoto(file, {
         objectName: objectItem?.name ?? t('common.object'),
@@ -218,20 +230,64 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
       setDraftPhotos(nextPhotos);
 
       if (isEditing && !markCompleted) {
+        setPhotoModalMode(null);
         return;
       }
 
+      const finalSignature = getPendingSignature();
       await onUpdateTask(task.id, {
         photos: nextPhotos,
         notes: notesEditedByUser ? draftNotes : task.notes,
         checklist_json: draftChecklist,
+        signature: finalSignature,
         ...(markCompleted
           ? { status: 'erledigt', completed_at: task.completed_at || new Date().toISOString() }
           : {}),
       });
+      setDraftSignature(finalSignature);
+      setHasDrawnSignature(false);
       if (markCompleted) {
         setDraftStatus('erledigt');
+        setIsEditing(false);
       }
+      setPhotoModalMode(null);
+    } catch (err) {
+      setPhotoModalError(
+        err instanceof Error ? err.message : 'Bild konnte nicht verarbeitet werden.'
+      );
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handleContinueWithoutPhotoFromModal = async () => {
+    if (photoModalMode !== 'complete') {
+      setPhotoModalMode(null);
+      return;
+    }
+    setUploadingPhoto(true);
+    setPhotoModalError(null);
+    try {
+      const finalSignature = getPendingSignature();
+      const nextNotes = notesEditedByUser ? draftNotes : task.notes;
+      await onUpdateTask(task.id, {
+        status: 'erledigt',
+        checklist_json: draftChecklist,
+        notes: nextNotes,
+        photos: draftPhotos,
+        signature: finalSignature,
+        completed_at: task.completed_at || new Date().toISOString(),
+      });
+      setDraftStatus('erledigt');
+      setDraftSignature(finalSignature);
+      setHasDrawnSignature(false);
+      setNotesEditedByUser(false);
+      setIsEditing(false);
+      setPhotoModalMode(null);
+    } catch (err) {
+      setPhotoModalError(
+        err instanceof Error ? err.message : 'Aufgabe konnte nicht abgeschlossen werden.'
+      );
     } finally {
       setUploadingPhoto(false);
     }
@@ -628,12 +684,24 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 </p>
               </div>
               {!isReadOnly && (
-                <PhotoUploadButtons
-                  onSelectFile={(file) => handlePhotoUpload(file, false)}
-                  loading={uploadingPhoto}
-                  loadingLabel={t('common.photoSending')}
-                  compact
-                />
+                <button
+                  type="button"
+                  disabled={uploadingPhoto}
+                  onClick={() => {
+                    setPhotoModalError(null);
+                    setPhotoModalMode('photo');
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-60 px-3.5 py-2 text-xs font-semibold text-white transition-colors cursor-pointer min-h-[38px] whitespace-nowrap"
+                >
+                  {uploadingPhoto ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  ) : (
+                    <Camera className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>
+                    {uploadingPhoto ? t('common.photoSending') : t('taskModal.addPhoto')}
+                  </span>
+                </button>
               )}
             </div>
 
@@ -761,38 +829,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
         {/* Sticky Footer CTA */}
         <div className="px-5 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-2">
-          {showEditFooter ? (
-            <>
-              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                {hasUnsavedChanges ? t('taskModal.unsavedChanges') : t('taskModal.editModeActive')}
-              </span>
-              <div className="flex flex-wrap items-center gap-2 ml-auto">
-                <button
-                  type="button"
-                  disabled={savingChanges}
-                  onClick={handleCancelChanges}
-                  className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-60 cursor-pointer"
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="button"
-                  disabled={savingChanges}
-                  onClick={() => void handleSaveChanges()}
-                  className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  {savingChanges ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4" />
-                  )}
-                  <span>
-                    {savingChanges ? t('common.saving') : t('taskModal.saveChanges')}
-                  </span>
-                </button>
-              </div>
-            </>
-          ) : (
+          {isReadOnly ? (
             <>
               <button
                 type="button"
@@ -803,26 +840,59 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               </button>
 
               <div className="flex flex-wrap items-center gap-2">
-                {task.status === 'erledigt' && (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditing(true)}
-                    className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    <Pencil className="w-4 h-4 text-orange-500" />
-                    <span>{t('taskModal.edit')}</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(true)}
+                  className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Pencil className="w-4 h-4 text-orange-500" />
+                  <span>{t('taskModal.edit')}</span>
+                </button>
 
                 <button
                   type="button"
                   disabled={exportingPdf}
                   onClick={() => void handleExportPdf()}
-                  className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60 ${
-                    task.status === 'erledigt'
-                      ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-sm'
-                      : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
-                  }`}
+                  className="flex items-center gap-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white shadow-sm px-4 py-2.5 text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60"
+                >
+                  {exportingPdf ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FileText className="w-4 h-4" />
+                  )}
+                  <span>{t('tasks.pdfProtocol')}</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={savingChanges}
+                  onClick={onClose}
+                  className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-60 cursor-pointer"
+                >
+                  {t('common.close')}
+                </button>
+                {isEditing && (
+                  <button
+                    type="button"
+                    disabled={savingChanges}
+                    onClick={handleCancelChanges}
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60 cursor-pointer"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 ml-auto">
+                <button
+                  type="button"
+                  disabled={exportingPdf}
+                  onClick={() => void handleExportPdf()}
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60"
                 >
                   {exportingPdf ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -832,14 +902,44 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   <span>{t('tasks.pdfProtocol')}</span>
                 </button>
 
-                {task.status !== 'erledigt' && (
-                  <PhotoUploadButtons
-                    onSelectFile={(file) => handlePhotoUpload(file, true)}
-                    loading={uploadingPhoto}
-                    loadingLabel={t('common.photoSending')}
-                    variant="emerald"
-                  />
+                {draftStatus !== 'erledigt' && (
+                  <button
+                    type="button"
+                    disabled={uploadingPhoto || savingChanges}
+                    onClick={() => {
+                      setPhotoModalError(null);
+                      setPhotoModalMode('complete');
+                    }}
+                    className="flex items-center gap-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-60 px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-white transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    {uploadingPhoto ? (
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    ) : (
+                      <Camera className="w-4 h-4 shrink-0" />
+                    )}
+                    <span>
+                      {uploadingPhoto
+                        ? t('common.photoSending')
+                        : t('taskModal.photoCompleteBtn')}
+                    </span>
+                  </button>
                 )}
+
+                <button
+                  type="button"
+                  disabled={savingChanges}
+                  onClick={() => void handleSaveChanges()}
+                  className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {savingChanges ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  <span>
+                    {savingChanges ? t('common.saving') : t('taskModal.saveChanges')}
+                  </span>
+                </button>
               </div>
             </>
           )}
@@ -881,6 +981,37 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             setPendingReopenStatus(null);
           }}
           onCancel={() => setPendingReopenStatus(null)}
+        />
+      )}
+
+      {/* Unified Photo / Complete Choice Modal */}
+      {photoModalMode !== null && (
+        <CompleteTaskModal
+          title={
+            photoModalMode === 'complete'
+              ? t('tasks.completeModalTitle')
+              : t('taskModal.addPhoto')
+          }
+          hint={
+            photoModalMode === 'complete'
+              ? t('tasks.completeModalHint')
+              : t('taskModal.photoSectionModalHint')
+          }
+          taskTitle={displayTitle}
+          subtitle={objectItem?.name ?? task.address}
+          allowWithoutPhoto={true}
+          confirmWithoutPhoto={true}
+          loading={uploadingPhoto}
+          error={photoModalError}
+          onSelectPhoto={(file) =>
+            handlePhotoUpload(file, photoModalMode === 'complete')
+          }
+          onContinueWithoutPhoto={handleContinueWithoutPhotoFromModal}
+          onClose={() => {
+            if (uploadingPhoto) return;
+            setPhotoModalError(null);
+            setPhotoModalMode(null);
+          }}
         />
       )}
     </div>

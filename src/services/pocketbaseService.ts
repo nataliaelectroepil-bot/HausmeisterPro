@@ -17,6 +17,7 @@ import {
 } from '../types/facility';
 import { getISOWeekAndYear, getWeekStartEnd } from '../utils/dateUtils';
 import { normalizeBinTypes } from '../utils/binMeta';
+import { cleanPropertyObject, cleanPropertyObjectList } from '../utils/objectUtils';
 import { compressTaskPhotoIfNeeded } from '../utils/photoWatermark';
 
 const STORAGE_KEYS = {
@@ -1499,31 +1500,75 @@ export const pocketbaseService = {
       const remote = await pbRequest<{ items: PropertyObject[] }>(
         `/api/collections/${pocketbaseConfig.collections.objects}/records?perPage=200`
       );
-      return (remote?.items ?? []).map((obj) => ({
+      const mapped = (remote?.items ?? []).map((obj) => ({
         ...obj,
         lat: Number(obj.lat),
         lng: Number(obj.lng),
         units_count: Number(obj.units_count) || 0,
       }));
+      return cleanPropertyObjectList(mapped).cleaned;
     }
     const seed = buildSeedData();
-    return readStorage<PropertyObject[]>(STORAGE_KEYS.objects, seed.objects);
+    const raw = readStorage<PropertyObject[]>(STORAGE_KEYS.objects, seed.objects);
+    const { cleaned, changed } = cleanPropertyObjectList(raw);
+    if (changed.length > 0) {
+      writeStorage(STORAGE_KEYS.objects, cleaned);
+    }
+    return cleaned;
+  },
+
+  async cleanupObjectsWithTasks(
+    objects: PropertyObject[],
+    tasks: FacilityTask[]
+  ): Promise<PropertyObject[]> {
+    const { cleaned, changed } = cleanPropertyObjectList(objects, tasks);
+    if (changed.length === 0) return cleaned;
+
+    if (this.isPocketBaseEnabled()) {
+      await Promise.allSettled(
+        changed.map((obj) =>
+          pbRequest<PropertyObject>(
+            `/api/collections/${pocketbaseConfig.collections.objects}/records/${obj.id}`,
+            {
+              method: 'PATCH',
+              body: JSON.stringify({
+                name: obj.name,
+                address: obj.address,
+              }),
+            }
+          )
+        )
+      );
+    } else {
+      writeStorage(STORAGE_KEYS.objects, cleaned);
+    }
+    return cleaned;
   },
 
   async createObject(input: Omit<PropertyObject, 'id'>): Promise<PropertyObject> {
+    const sanitized = cleanPropertyObject({
+      ...input,
+      id: '',
+    });
+    const cleanInput: Omit<PropertyObject, 'id'> = {
+      ...input,
+      name: sanitized.name || sanitized.address,
+      address: sanitized.address,
+    };
+
     if (this.isPocketBaseEnabled()) {
       const hasValidClientId =
-        Boolean(input.client_id) && !/^u\d+$/.test(input.client_id);
+        Boolean(cleanInput.client_id) && !/^u\d+$/.test(cleanInput.client_id);
       const pbPayload: Record<string, unknown> = {
-        name: input.name,
-        address: input.address,
-        lat: Number(input.lat),
-        lng: Number(input.lng),
-        client_name: input.client_name || '',
-        units_count: Number(input.units_count) || 0,
+        name: cleanInput.name,
+        address: cleanInput.address,
+        lat: Number(cleanInput.lat),
+        lng: Number(cleanInput.lng),
+        client_name: cleanInput.client_name || '',
+        units_count: Number(cleanInput.units_count) || 0,
       };
       if (hasValidClientId) {
-        pbPayload.client_id = input.client_id;
+        pbPayload.client_id = cleanInput.client_id;
       }
       const createdRemote = await pbRequest<PropertyObject>(
         `/api/collections/${pocketbaseConfig.collections.objects}/records`,
@@ -1535,16 +1580,16 @@ export const pocketbaseService = {
       if (!createdRemote) {
         throw new PocketBaseApiError('Objekt nije spremljen na PocketBase server.', 500);
       }
-      return {
+      return cleanPropertyObject({
         ...createdRemote,
         lat: Number(createdRemote.lat),
         lng: Number(createdRemote.lng),
         units_count: Number(createdRemote.units_count) || 0,
-      };
+      });
     }
 
     const created: PropertyObject = {
-      ...input,
+      ...cleanInput,
       id: `obj_${Date.now()}`,
     };
     const list = await this.getObjects();
@@ -1900,6 +1945,46 @@ export const pocketbaseService = {
     return updated;
   },
 
+  async updateMeterReading(
+    id: string,
+    patch: Partial<Omit<MeterReading, 'id'>>
+  ): Promise<MeterReading[]> {
+    const safePatch: Partial<Omit<MeterReading, 'id'>> = patch.photo
+      ? { ...patch, photo: await compressTaskPhotoIfNeeded(patch.photo) }
+      : patch;
+
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(
+        `/api/collections/${pocketbaseConfig.collections.meter_readings}/records/${id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(safePatch),
+        }
+      );
+      return this.getMeterReadings();
+    }
+    const list = await this.getMeterReadings();
+    const updated = list.map((r) => (r.id === id ? { ...r, ...safePatch } : r));
+    writeStorage(STORAGE_KEYS.meterReadings, updated);
+    return updated;
+  },
+
+  async deleteMeterReading(id: string): Promise<MeterReading[]> {
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(
+        `/api/collections/${pocketbaseConfig.collections.meter_readings}/records/${id}`,
+        {
+          method: 'DELETE',
+        }
+      );
+      return this.getMeterReadings();
+    }
+    const list = await this.getMeterReadings();
+    const updated = list.filter((r) => r.id !== id);
+    writeStorage(STORAGE_KEYS.meterReadings, updated);
+    return updated;
+  },
+
   // --- MODULE 3: Wohnungsübergabe (handover_protocols) ---
   async getHandoverProtocols(): Promise<HandoverProtocol[]> {
     if (this.isPocketBaseEnabled()) {
@@ -2020,6 +2105,22 @@ export const pocketbaseService = {
     const created: GardenLog = { ...safeInput, id: `gl_${Date.now()}` };
     const list = await this.getGardenLogs();
     const updated = [created, ...list];
+    writeStorage(STORAGE_KEYS.gardenLogs, updated);
+    return updated;
+  },
+
+  async deleteGardenLog(id: string): Promise<GardenLog[]> {
+    if (this.isPocketBaseEnabled()) {
+      await pbRequest(
+        `/api/collections/${pocketbaseConfig.collections.garden_logs}/records/${id}`,
+        {
+          method: 'DELETE',
+        }
+      );
+      return this.getGardenLogs();
+    }
+    const list = await this.getGardenLogs();
+    const updated = list.filter((l) => l.id !== id);
     writeStorage(STORAGE_KEYS.gardenLogs, updated);
     return updated;
   },

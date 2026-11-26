@@ -22,21 +22,25 @@ export const ReminderBanner: React.FC<ReminderBannerProps> = ({
   return (
     <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800/60 px-3 sm:px-6 py-2.5">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
+        <button
+          type="button"
+          onClick={onViewTasks}
+          className="flex items-center gap-2.5 min-w-0 flex-1 text-left rounded-md px-1.5 py-1 -ml-1.5 hover:bg-amber-200/40 dark:hover:bg-amber-900/30 transition-colors cursor-pointer"
+        >
           {overdueCount > 0 ? (
             <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
           ) : (
             <BellRing className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
           )}
-          <p className="text-xs sm:text-sm font-medium text-amber-950 dark:text-amber-100 truncate">
+          <span className="text-xs sm:text-sm font-medium text-amber-950 dark:text-amber-100 truncate">
             {t('banner.tomorrowTasks', { count: tomorrowCount })}
             {overdueCount > 0 && (
               <span className="ml-2 text-red-700 dark:text-red-400 font-semibold tabular-nums">
                 {t('banner.overdueSuffix', { count: overdueCount })}
               </span>
             )}
-          </p>
-        </div>
+          </span>
+        </button>
 
         <div className="flex items-center gap-2 shrink-0">
           <button
