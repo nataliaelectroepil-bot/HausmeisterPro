@@ -869,9 +869,6 @@ export const MapTab: React.FC<MapTabProps> = ({
                     <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
                       {obj.address}
                     </p>
-                    <p className="mt-1.5 font-mono text-[11px] text-slate-400 tabular-nums">
-                      GPS: {obj.lat.toFixed(4)}, {obj.lng.toFixed(4)}
-                    </p>
                   </div>
 
                   <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
