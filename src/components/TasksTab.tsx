@@ -5,7 +5,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Clock,
-  FileText,
+  FileDown,
   Loader2,
   MapPin,
   Search,
@@ -168,7 +168,7 @@ export const TasksTab: React.FC<TasksTabProps> = ({
         task: translatedTask,
         obj,
         worker,
-        docLang: docLanguage,
+        docLang: 'DE',
       });
     } finally {
       setExportingPdfId(null);
@@ -459,6 +459,8 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                     <button
                       type="button"
                       disabled={exportingPdfId === task.id}
+                      title="Aufgabe als PDF herunterladen"
+                      aria-label="Aufgabe als PDF herunterladen"
                       onClick={(e) => {
                         e.stopPropagation();
                         void handleExportPdf(task, obj, worker);
@@ -472,9 +474,9 @@ export const TasksTab: React.FC<TasksTabProps> = ({
                       {exportingPdfId === task.id ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
-                        <FileText className="w-3.5 h-3.5" />
+                        <FileDown className="w-3.5 h-3.5" />
                       )}
-                      <span>{t('tasks.pdfProtocol')}</span>
+                      <span>PDF</span>
                     </button>
 
                     {task.status !== 'erledigt' ? (

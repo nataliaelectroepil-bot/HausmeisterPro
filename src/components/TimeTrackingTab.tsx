@@ -18,7 +18,10 @@ import {
   formatTimeDE,
   getTodayISODate,
 } from '../utils/dateUtils';
-import { exportMonthlyTimesheetPDF } from '../utils/pdfExport';
+import {
+  exportDailyWorkdayPDF,
+  exportMonthlyTimesheetPDF,
+} from '../utils/pdfExport';
 import { useTranslation } from '../i18n/LanguageContext';
 import { PDF_LABELS } from '../i18n/translations';
 import { pb } from '../services/pocketbaseService';
@@ -387,11 +390,28 @@ export const TimeTrackingTab: React.FC<TimeTrackingTabProps> = ({
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
           {userEntries.map((entry) => {
             const expanded = expandedDayId === entry.id;
+            const isTodayLive =
+              entry.date === todayStr &&
+              (entry.status === 'aktiv' || entry.status === 'pause');
+            const effectiveWorkMinutes = isTodayLive
+              ? Math.floor(liveStats.workSeconds / 60)
+              : entry.total_work_minutes;
+            const effectivePauseMinutes = isTodayLive
+              ? liveStats.pauseMinutes
+              : entry.total_pause_minutes;
+
             return (
               <div key={entry.id}>
-                <button
-                  type="button"
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setExpandedDayId(expanded ? null : entry.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setExpandedDayId(expanded ? null : entry.id);
+                    }
+                  }}
                   className="w-full px-5 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer min-h-[52px]"
                 >
                   <div className="min-w-0">
@@ -401,21 +421,45 @@ export const TimeTrackingTab: React.FC<TimeTrackingTabProps> = ({
                     <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
                       {formatTimeDE(entry.start_time)} –{' '}
                       {entry.end_time ? formatTimeDE(entry.end_time) : t('time.activeLabel')} ·{' '}
-                      {t('time.pause')}: {entry.total_pause_minutes} {t('common.min')}
+                      {t('time.pause')}: {effectivePauseMinutes} {t('common.min')}
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
                     <span className="font-mono text-sm font-bold text-slate-900 dark:text-white tabular-nums">
-                      {formatMinutesAsHoursDE(entry.total_work_minutes)}
+                      {formatMinutesAsHoursDE(effectiveWorkMinutes)}
                     </span>
+                    <button
+                      type="button"
+                      title="Tagesbericht als PDF herunterladen"
+                      aria-label="Tagesbericht als PDF herunterladen"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        exportDailyWorkdayPDF({
+                          user: {
+                            ...sessionModel,
+                            id: activeWorkerId,
+                            name: activeWorkerName,
+                          },
+                          entry: {
+                            ...entry,
+                            total_work_minutes: effectiveWorkMinutes,
+                            total_pause_minutes: effectivePauseMinutes,
+                          },
+                        });
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-orange-500 hover:text-orange-600 dark:hover:text-orange-400 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                    >
+                      <FileDown className="w-3.5 h-3.5" />
+                      <span>PDF</span>
+                    </button>
                     {expanded ? (
                       <ChevronUp className="w-4 h-4 text-slate-400" />
                     ) : (
                       <ChevronDown className="w-4 h-4 text-slate-400" />
                     )}
                   </div>
-                </button>
+                </div>
 
                 {expanded && (
                   <div className="px-5 pb-4 pt-1 bg-slate-50 dark:bg-slate-800/30 text-xs text-slate-600 dark:text-slate-300 grid grid-cols-1 sm:grid-cols-3 gap-2">

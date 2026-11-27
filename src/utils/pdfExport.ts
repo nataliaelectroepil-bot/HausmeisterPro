@@ -222,6 +222,172 @@ export function exportMonthlyTimesheetPDF({
   doc.save(`Stundennachweis_${user.employee_id}_${safeMonth}.pdf`);
 }
 
+export function exportDailyWorkdayPDF({
+  user,
+  entry,
+}: {
+  user: User;
+  entry: TimeEntry;
+}): void {
+  const docLang: DocLanguageCode = 'DE';
+  const L = PDF_LABELS.DE;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 16;
+  const contentWidth = pageWidth - margin * 2;
+  const dateLabel = formatDateDE(entry.date);
+
+  drawBrandHeader(
+    doc,
+    'TAGESBERICHT / ARBEITSZEITNACHWEIS',
+    dateLabel,
+    `Erstellt am: ${new Date().toLocaleDateString('de-DE')}`,
+    docLang
+  );
+
+  // Employee Metadata Box (matching monthly PDF export styling)
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, 42, contentWidth, 24, 2, 2, 'FD');
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('Mitarbeiter:', 22, 51);
+  doc.text('Personal-Nr.:', 22, 59);
+  doc.text('Region:', 110, 51);
+  doc.text('E-Mail:', 110, 59);
+
+  doc.setFont('helvetica', 'normal');
+  doc.text(sanitizeHelveticaText(user.name || '—'), 48, 51);
+  doc.text(sanitizeHelveticaText(user.employee_id || '—'), 48, 59);
+  doc.text(sanitizeHelveticaText(user.region || '—'), 138, 51);
+  doc.text(sanitizeHelveticaText(user.email || '—'), 138, 59);
+
+  // Single-Day Shift Details Table
+  let y = 76;
+  doc.setFillColor(30, 41, 59);
+  doc.rect(margin, y, contentWidth, 9, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+
+  doc.text('Datum', 20, y + 6);
+  doc.text('Start', 54, y + 6);
+  doc.text('Ende', 80, y + 6);
+  doc.text('Pause', 106, y + 6);
+  doc.text('Gesamtzeit', 132, y + 6);
+  doc.text('Status', 166, y + 6);
+
+  y += 10;
+
+  doc.setFillColor(248, 250, 252);
+  doc.rect(margin, y - 1, contentWidth, 9, 'F');
+
+  const statusLabel =
+    entry.status === 'beendet'
+      ? 'Beendet'
+      : entry.status === 'aktiv'
+        ? 'Aktiv'
+        : entry.status === 'pause'
+          ? 'Pause'
+          : 'Offen';
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(15, 23, 42);
+  doc.text(dateLabel, 20, y + 5);
+  doc.text(`${formatTimeDE(entry.start_time)} Uhr`, 54, y + 5);
+  doc.text(
+    entry.end_time ? `${formatTimeDE(entry.end_time)} Uhr` : 'Laufend',
+    80,
+    y + 5
+  );
+  doc.text(`${entry.total_pause_minutes} Min.`, 106, y + 5);
+  doc.text(formatMinutesAsHoursDE(entry.total_work_minutes), 132, y + 5);
+  doc.text(statusLabel, 166, y + 5);
+
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, y + 8, pageWidth - margin, y + 8);
+  y += 14;
+
+  // Notes / Activity Box
+  const noteText =
+    entry.notes?.trim() || 'Objektbetreuung & Kontrollgang';
+  const preparedNotes = prepareSmartText(
+    doc,
+    noteText,
+    contentWidth - 12,
+    9.5,
+    'normal'
+  );
+  const notesBoxHeight = Math.max(20, 12 + preparedNotes.lines.length * 5);
+
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, y, contentWidth, notesBoxHeight, 2, 2, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text('Tätigkeiten & Notizen:', margin + 5, y + 7);
+  renderSmartLines(
+    doc,
+    preparedNotes,
+    margin + 5,
+    y + 13,
+    contentWidth - 10,
+    9.5,
+    'normal',
+    [15, 23, 42],
+    5
+  );
+  y += notesBoxHeight + 8;
+
+  // Daily Summary Highlight Box (matching monthly summary styling)
+  doc.setFillColor(241, 245, 249);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, y, contentWidth, 20, 2, 2, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text(
+    `Schicht: ${formatTimeDE(entry.start_time)} – ${entry.end_time ? formatTimeDE(entry.end_time) : 'Aktiv'}`,
+    22,
+    y + 8
+  );
+  doc.text(`Pausenzeit gesamt: ${entry.total_pause_minutes} ${L.minUnit}`, 22, y + 14.5);
+
+  doc.setTextColor(249, 115, 22);
+  doc.setFontSize(11);
+  doc.text(
+    `Gesamtzeit (Netto): ${formatMinutesAsHoursDE(entry.total_work_minutes)}`,
+    pageWidth - 22,
+    y + 11.5,
+    { align: 'right' }
+  );
+
+  // Signature Lines at the bottom
+  const sigY = Math.max(y + 38, pageHeight - 36);
+  doc.setDrawColor(148, 163, 184);
+  doc.line(margin, sigY, 88, sigY);
+  doc.line(122, sigY, pageWidth - margin, sigY);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    sanitizeHelveticaText(`Datum / Unterschrift Mitarbeiter (${user.name})`),
+    margin,
+    sigY + 5
+  );
+  doc.text('Datum / Unterschrift Disposition', 122, sigY + 5);
+
+  doc.save(`Tagesbericht_${entry.date}.pdf`);
+}
+
 export function exportTasksReportPDF({
   tasks,
   objects,
@@ -1288,8 +1454,8 @@ export function exportTaskProtocolPDF({
           photosTitle: 'Fotodokumentation:',
           noPhotos: 'Keine Nachweisfotos hochgeladen.',
           photoErr: 'Nachweisfoto vorhanden (Bildformat nicht direkt einbettbar).',
-          sigWorker: 'Unterschrift Mitarbeiter',
-          sigClient: 'Unterschrift Auftraggeber',
+          sigWorker: 'Datum / Unterschrift Mitarbeiter',
+          sigClient: 'Datum / Unterschrift Auftraggeber',
           legalClause: 'Elektronischer Leistungsnachweis gemäß Verkehrssicherungspflicht',
         };
 
@@ -1641,13 +1807,14 @@ export function exportTaskProtocolPDF({
   doc.text(txt(labels.legalClause), pageWidth / 2, legalY + 1, { align: 'center' });
 
   const datePart = (task.completed_at || task.due_date || new Date().toISOString()).slice(0, 10);
-  const safeTaskName =
-    task.title
+  const rawPropertyLabel = obj?.name || task.address || task.title || 'Objekt';
+  const safePropertyName =
+    rawPropertyLabel
       .trim()
       .replace(/[^\p{L}\p{N}_-]+/gu, '_')
       .replace(/^_+|_+$/g, '')
-      .slice(0, 50) || 'Aufgabe';
+      .slice(0, 45) || 'Objekt';
 
-  doc.save(`Einsatzprotokoll_${datePart}_${safeTaskName}.pdf`);
+  doc.save(`Aufgabe_${safePropertyName}_${datePart}.pdf`);
 }
 
