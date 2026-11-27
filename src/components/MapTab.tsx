@@ -16,21 +16,24 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 import { useTaskTranslation } from '../i18n/TaskTranslationContext';
-import { FacilityTask, PropertyObject } from '../types/facility';
+import { FacilityTask, PropertyObject, User } from '../types/facility';
 import { formatDateTimeDE, isTaskOverdue } from '../utils/dateUtils';
 import { createWatermarkedPhoto } from '../utils/photoWatermark';
 import { searchAddressCoordinates } from '../utils/geocoding';
 import { CompleteTaskModal } from './CompleteTaskModal';
+import { PropertyDetailModal } from './PropertyDetailModal';
 
 interface MapTabProps {
   objects: PropertyObject[];
   tasks: FacilityTask[];
+  users: User[];
   onOpenTaskDetail: (task: FacilityTask) => void;
   onQuickCompleteWithPhoto: (
     task: FacilityTask,
     photoData: Awaited<ReturnType<typeof createWatermarkedPhoto>>
   ) => Promise<void>;
   onOpenModulesForObject: (objectId: string) => void;
+  onCreateTaskForObject: (objectId: string) => void;
 }
 
 interface StandaloneTaskPin {
@@ -131,14 +134,17 @@ function hasValidCoords(obj: PropertyObject): boolean {
 export const MapTab: React.FC<MapTabProps> = ({
   objects,
   tasks,
+  users,
   onOpenTaskDetail,
   onQuickCompleteWithPhoto,
   onOpenModulesForObject,
+  onCreateTaskForObject,
 }) => {
   const { t, tCategory, tStatus } = useTranslation();
   const { getTaskTitle, getTaskDescription } = useTaskTranslation();
   const [viewMode, setViewMode] = useState<'karte' | 'objektliste'>('karte');
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [detailObjectId, setDetailObjectId] = useState<string | null>(null);
   const [selectedStandaloneTaskId, setSelectedStandaloneTaskId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [uploadingId, setUploadingId] = useState<string | null>(null);
@@ -425,6 +431,7 @@ export const MapTab: React.FC<MapTabProps> = ({
   ]);
 
   const selectedObject = objects.find((o) => o.id === selectedObjectId) ?? null;
+  const detailObject = objects.find((o) => o.id === detailObjectId) ?? null;
   const selectedStandalonePin =
     standaloneTaskPins.find((p) => p.task.id === selectedStandaloneTaskId) ?? null;
   const selectedObjectTasks = selectedObject
@@ -837,7 +844,16 @@ export const MapTab: React.FC<MapTabProps> = ({
               return (
                 <div
                   key={obj.id}
-                  className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col justify-between gap-4"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setDetailObjectId(obj.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setDetailObjectId(obj.id);
+                    }
+                  }}
+                  className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col justify-between gap-4 cursor-pointer hover:border-orange-400 dark:hover:border-orange-500 hover:shadow-md transition-all text-left"
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -875,10 +891,16 @@ export const MapTab: React.FC<MapTabProps> = ({
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div
+                      className="flex items-center gap-1.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <button
                         type="button"
-                        onClick={() => onOpenModulesForObject(obj.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenModulesForObject(obj.id);
+                        }}
                         className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-orange-500 cursor-pointer"
                       >
                         <Wrench className="w-3 h-3 text-orange-500" />
@@ -886,7 +908,8 @@ export const MapTab: React.FC<MapTabProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedObjectId(obj.id);
                           setViewMode('karte');
                         }}
@@ -898,6 +921,7 @@ export const MapTab: React.FC<MapTabProps> = ({
                         href={`https://www.google.com/maps/dir/?api=1&destination=${obj.lat},${obj.lng}`}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
                         className="flex items-center gap-1 rounded-lg bg-orange-500 hover:bg-orange-600 px-2.5 py-1.5 text-xs font-semibold text-white"
                       >
                         <span>{t('map.route')}</span>
@@ -910,6 +934,23 @@ export const MapTab: React.FC<MapTabProps> = ({
             })}
           </div>
         </div>
+      )}
+
+      {detailObject && (
+        <PropertyDetailModal
+          objectItem={detailObject}
+          tasks={tasksByObject.get(detailObject.id) || []}
+          users={users}
+          onClose={() => setDetailObjectId(null)}
+          onOpenModules={(objId) => onOpenModulesForObject(objId)}
+          onShowOnMap={(objId) => {
+            setSelectedObjectId(objId);
+            setDetailObjectId(null);
+            setViewMode('karte');
+          }}
+          onCreateTaskForObject={(objId) => onCreateTaskForObject(objId)}
+          onOpenTaskDetail={(task) => onOpenTaskDetail(task)}
+        />
       )}
 
       {completeModalTarget && (

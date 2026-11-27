@@ -34,6 +34,7 @@ interface CreateTaskModalProps {
   users: User[];
   currentUser: User;
   defaultDate?: string;
+  defaultObjectId?: string;
   onClose: () => void;
   onCreateObject: (obj: Omit<PropertyObject, 'id'>) => Promise<PropertyObject>;
   onCreateTask: (task: Omit<FacilityTask, 'id' | 'created_at'>) => Promise<void>;
@@ -77,6 +78,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   users,
   currentUser,
   defaultDate,
+  defaultObjectId,
   onClose,
   onCreateObject,
   onCreateTask,
@@ -91,9 +93,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [isTitleManuallyEdited, setIsTitleManuallyEdited] = useState(false);
   const [description, setDescription] = useState('');
   const [addressMode, setAddressMode] = useState<'existing' | 'manual' | 'newObject'>(
-    objects.length > 0 ? 'existing' : 'manual'
+    defaultObjectId || objects.length > 0 ? 'existing' : 'manual'
   );
-  const [objectId, setObjectId] = useState<string>(objects[0]?.id ?? '');
+  const [objectId, setObjectId] = useState<string>(defaultObjectId || objects[0]?.id || '');
   const [assignedTo, setAssignedTo] = useState<string>(currentUser.id);
   const [priority, setPriority] = useState<TaskPriority>('normal');
   const [dueDate, setDueDate] = useState<string>(defaultDate || getTodayISODate());
@@ -126,10 +128,15 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   } | null>(null);
 
   useEffect(() => {
+    if (defaultObjectId && objects.some((o) => o.id === defaultObjectId)) {
+      setAddressMode('existing');
+      setObjectId(defaultObjectId);
+      return;
+    }
     if (!objectId && objects.length > 0) {
       setObjectId(objects[0].id);
     }
-  }, [objects, objectId]);
+  }, [defaultObjectId, objects, objectId]);
 
   const selectedObject = objects.find((o) => o.id === objectId);
 

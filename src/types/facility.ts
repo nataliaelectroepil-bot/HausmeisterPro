@@ -23,6 +23,9 @@ export interface PropertyObject {
   client_id: string;
   client_name: string;
   units_count: number;
+  access_notes?: string;
+  key_info?: string;
+  notes?: string;
 }
 
 export type TaskCategory =

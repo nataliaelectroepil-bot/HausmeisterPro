@@ -112,6 +112,9 @@ export default function App() {
   const [createTaskDefaultDate, setCreateTaskDefaultDate] = useState<string | undefined>(
     undefined
   );
+  const [createTaskDefaultObjectId, setCreateTaskDefaultObjectId] = useState<string | undefined>(
+    undefined
+  );
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
@@ -520,6 +523,7 @@ export default function App() {
         onMarkAllRead={handleMarkAllRead}
         onOpenNewTask={() => {
           setCreateTaskDefaultDate(undefined);
+          setCreateTaskDefaultObjectId(undefined);
           setShowCreateTaskModal(true);
         }}
         onLogout={handleLogout}
@@ -555,11 +559,17 @@ export default function App() {
               <MapTab
                 objects={objects}
                 tasks={tasks}
+                users={users}
                 onOpenTaskDetail={(task) => setSelectedTaskId(task.id)}
                 onQuickCompleteWithPhoto={handleQuickCompleteWithPhoto}
                 onOpenModulesForObject={(objId) => {
                   setDrawerDefaultObjectId(objId);
                   setShowModulesDrawer(true);
+                }}
+                onCreateTaskForObject={(objId) => {
+                  setCreateTaskDefaultDate(undefined);
+                  setCreateTaskDefaultObjectId(objId);
+                  setShowCreateTaskModal(true);
                 }}
               />
             )}
@@ -601,6 +611,7 @@ export default function App() {
                 onOpenTaskDetail={(task) => setSelectedTaskId(task.id)}
                 onCreateTaskForDate={(dateStr) => {
                   setCreateTaskDefaultDate(dateStr);
+                  setCreateTaskDefaultObjectId(undefined);
                   setShowCreateTaskModal(true);
                 }}
                 onToggleBinOut={(bin) =>
@@ -738,7 +749,11 @@ export default function App() {
           users={users}
           currentUser={currentUser}
           defaultDate={createTaskDefaultDate}
-          onClose={() => setShowCreateTaskModal(false)}
+          defaultObjectId={createTaskDefaultObjectId}
+          onClose={() => {
+            setCreateTaskDefaultObjectId(undefined);
+            setShowCreateTaskModal(false);
+          }}
           onCreateObject={handleCreateObject}
           onCreateTask={handleCreateTask}
         />
